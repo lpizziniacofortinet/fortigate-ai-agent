@@ -2,9 +2,10 @@
 
 A basic AI agent written in Python that connects to a FortiGate firewall's REST API using the modern **`google-genai`** SDK. The agent is equipped with custom tools (API functions) that enable it to dynamically retrieve and inspect device status, resource utilization, network interfaces, VPN tunnel connectivity (both IPsec and SSL-VPN), IPv4 routing tables, and system event logs. 
 
-It provides two operations modes:
+It provides three operations modes:
 1. **Automated Diagnostics**: Gathers all diagnostics data, passes it to the AI agent, and generates a structured markdown-based health assessment and troubleshooting report.
 2. **Interactive Console**: A stateful chat session where you can ask arbitrary questions about the FortiGate, and the AI agent automatically decides which API tools to invoke in the background to respond to you.
+3. **Autonomous Agentic Call**: Multi-step chain-of-thought call loop where the AI agent autonomously executes tool calls, inspects findings, triggers follow-up telemetry (e.g. log queries or firewall policy inspections), and prints a live reasoning trace of all tools called.
 
 It also features a high-fidelity **Mock Mode** for offline testing and demonstration purposes.
 
@@ -89,18 +90,21 @@ python3 main.py
 You can bypass the menu and directly target specific environments or configurations using CLI flags:
 ```bash
 # General Syntax
-python3 main.py [diagnose | interactive | config] [options]
+python3 main.py [diagnose | interactive | agentic | config] [options]
 
 # Direct Overrides Examples:
 # Run diagnostics on a specific IP, port, and VDOM with SSL verification enabled
 python3 main.py diagnose --ip 10.0.0.1 --port 8443 --vdom CustomVDOM --verify-ssl
+
+# Run autonomous multi-step agentic call with execution tracing
+python3 main.py agentic
 
 # Enter the interactive AI console forcing offline mock mode simulation
 python3 main.py interactive --mock
 ```
 
 Available options:
-* `command` (positional): Command to run directly. Choices: `diagnose`, `interactive`, `config`.
+* `command` (positional): Command to run directly. Choices: `diagnose`, `interactive`, `agentic`, `config`.
 * `--json`, `-j`: Output parsed diagnostics result in raw JSON format (suppresses standard stdout prints, useful for scripting).
 * `--mock`, `-m`: Force Mock Mode (simulated responses).
 * `--enable-write`, `-w`: Enable active write/mitigation actions (disabled by default for safety).
