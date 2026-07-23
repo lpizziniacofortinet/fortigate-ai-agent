@@ -360,3 +360,55 @@ class FortiGateAgent:
             model=self.model,
             config=config
         )
+
+    def run_agentic_loop(self, prompt: str) -> Dict[str, Any]:
+        """
+        Executes a multi-turn agentic reasoning loop with step-by-step tool inspection and chain-of-thought tracking.
+        
+        Returns:
+            Dict containing:
+            - 'prompt': Original prompt
+            - 'tools_executed': List of tool names called during reasoning
+            - 'history_steps': Detailed step-by-step execution log
+            - 'final_response': Synthesized final agent response text
+        """
+        logger.info(f"Starting explicit agentic reasoning loop for: '{prompt}'")
+        chat = self.create_chat_session()
+        response = chat.send_message(prompt)
+        
+        history = chat.get_history()
+        tools_executed = []
+        history_steps = []
+        
+        for msg in history:
+            role = msg.role
+            for part in msg.parts:
+                if hasattr(part, 'function_call') and part.function_call:
+                    fn_name = part.function_call.name
+                    fn_args = dict(part.function_call.args) if part.function_call.args else {}
+                    tools_executed.append(fn_name)
+                    history_steps.append({
+                        "step": "function_call",
+                        "name": fn_name,
+                        "args": fn_args
+                    })
+                    logger.info(f"[Agentic Loop] Executed Tool: {fn_name} with args: {fn_args}")
+                elif hasattr(part, 'function_response') and part.function_response:
+                    fn_name = part.function_response.name
+                    history_steps.append({
+                        "step": "function_response",
+                        "name": fn_name
+                    })
+                elif hasattr(part, 'text') and part.text:
+                    history_steps.append({
+                        "step": "thought_or_response",
+                        "role": role,
+                        "text": part.text
+                    })
+
+        return {
+            "prompt": prompt,
+            "tools_executed": tools_executed,
+            "history_steps": history_steps,
+            "final_response": response.text
+        }

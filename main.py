@@ -2,11 +2,13 @@ import os
 import sys
 import logging
 import argparse
+from typing import Optional, Dict, Any, List
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 from rich.markdown import Markdown
 from rich.prompt import Prompt, Confirm
+
 
 # Configure Logging
 def setup_logging():
@@ -258,6 +260,39 @@ def run_interactive_mode(agent: FortiGateAgent):
         except Exception as e:
             console.print(f"[red]Error during agent processing: {e}[/red]")
 
+def run_agentic_mode(agent: FortiGateAgent, prompt: Optional[str] = None):
+    """Runs a multi-step agentic call with chain-of-thought tool execution tracing."""
+    if not prompt:
+        prompt = (
+            "Perform an autonomous multi-step investigation of the FortiGate firewall. "
+            "Inspect system health, interfaces, routing table, and VPN status. "
+            "If any interface or routing/VPN anomaly is found, inspect system logs or policies to explain the root cause."
+        )
+        
+    console.print("\n[bold purple]Starting Autonomous Multi-Step Agentic Call...[/bold purple]")
+    console.print(f"[cyan]Prompt:[/cyan] {prompt}\n")
+    
+    with console.status("[bold purple]Agentic loop executing tool calls and reasoning steps...") as status:
+        try:
+            result = agent.run_agentic_loop(prompt)
+        except Exception as e:
+            console.print(f"[red]Agentic Loop Execution Error: {e}[/red]")
+            return
+
+    # Display Chain-of-Thought / Executed Tools
+    tools_called = result.get("tools_executed", [])
+    if tools_called:
+        console.print(Panel(
+            "\n".join(f" [green]✓[/green] Tool Executed: [bold]{t}[/bold]" for t in tools_called),
+            title="Agentic Reasoning Trace (Executed Tools)",
+            border_style="green"
+        ))
+    else:
+        console.print("[yellow]No external tools required for this query.[/yellow]")
+        
+    # Display Final Assessment
+    console.print(Panel(Markdown(result["final_response"]), title="Final Agentic Assessment", border_style="purple"))
+
 def parse_args():
     """Parses command-line arguments for CLI overrides."""
     parser = argparse.ArgumentParser(
@@ -266,7 +301,7 @@ def parse_args():
     parser.add_argument(
         "command",
         nargs="?",
-        choices=["diagnose", "interactive", "config"],
+        choices=["diagnose", "interactive", "agentic", "config"],
         help="Command to run directly. If omitted, displays the interactive selection menu."
     )
     parser.add_argument(
@@ -387,6 +422,9 @@ def main():
         elif cmd == "interactive":
             run_interactive_mode(agent)
             return
+        elif cmd == "agentic":
+            run_agentic_mode(agent)
+            return
         elif cmd == "config":
             # Configuration was already printed
             return
@@ -396,20 +434,24 @@ def main():
         console.print("\n[bold cyan]Select an Operation Mode:[/bold cyan]")
         console.print(" 1. Run Automated Diagnostics & Health Report")
         console.print(" 2. Enter Interactive Chat Console")
-        console.print(" 3. View Current Configuration Settings")
-        console.print(" 4. Exit")
+        console.print(" 3. Run Autonomous Agentic Reasoning Call")
+        console.print(" 4. View Current Configuration Settings")
+        console.print(" 5. Exit")
         
-        choice = Prompt.ask("Enter selection (1-4)", choices=["1", "2", "3", "4"], default="1")
+        choice = Prompt.ask("Enter selection (1-5)", choices=["1", "2", "3", "4", "5"], default="1")
         
         if choice == "1":
             run_diagnostics(agent, output_json=False)
         elif choice == "2":
             run_interactive_mode(agent)
         elif choice == "3":
-            Config.print_status()
+            run_agentic_mode(agent)
         elif choice == "4":
+            Config.print_status()
+        elif choice == "5":
             console.print("[green]Goodbye![/green]")
             break
 
 if __name__ == "__main__":
     main()
+
