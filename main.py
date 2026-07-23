@@ -70,7 +70,7 @@ def ensure_api_key():
         Config.GEMINI_API_KEY = api_key.strip()
         if Confirm.ask("Would you like to save this key to your .env file?"):
             try:
-                env_path = "/mnt/c/Users/lpizziniaco/Documents/Dev/fortios/.env"
+                env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
                 content = ""
                 if os.path.exists(env_path):
                     with open(env_path, "r") as f:
