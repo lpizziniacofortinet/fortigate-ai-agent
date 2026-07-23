@@ -1,0 +1,118 @@
+.TH FORTIGATE-AI-AGENT 1 "JULY 2026" "v1.0.0" "FortiGate AI Agent Manual"
+.SH NAME
+fortigate-ai-agent \- AI-powered diagnostics and operations CLI for FortiGate firewalls
+.SH SYNOPSIS
+.B python3 main.py
+[\fIcommand\fR]
+[\fIoptions\fR]
+.SH DESCRIPTION
+.B fortigate-ai-agent
+is an agentic CLI utility powered by Gemini. It connects to the FortiOS REST API to perform automatic system health diagnostics, interface reviews, VPN audits, and routing lookups. 
+The tool supports an interactive chat console, a structured silent JSON diagnostics reporter, and a high-fidelity offline simulation (Mock Mode).
+
+.SH COMMANDS
+.TP
+.B diagnose
+Run a comprehensive, real-time diagnostic suite. Fetches system status, resource usage, interfaces status, VPN connections, routing table, and event logs. Feeds all data to the Gemini agent to compile a security and health report. This is the default command if none is specified.
+.TP
+.B interactive
+Enter an interactive console chat. Launches a stateful session where you can query the AI agent in real-time. The agent dynamically decides which REST API tools to execute to answer your queries.
+.TP
+.B config
+Inspect the current connection details, target VDOM, SSL settings, execution mode (Mock or Live), and Gemini model selection.
+
+.SH OPTIONS
+.TP
+.B \-j, \-\-json
+Run diagnostics silently, bypassing ASCII headers and progress indicators. Enforces the AI agent to output the health analysis as a structured JSON object matching a strict Pydantic schema (ideal for pipelines and scripting).
+.TP
+.B \-m, \-\-mock
+Force offline Mock Mode. Simulates high-fidelity FortiGate telemetry (e.g. CPU spikes, down interfaces, VPN pre-shared key negotiation failures) without making network requests.
+.TP
+.B \-w, \-\-enable\-write
+Enable active write/mitigation actions (disabled by default for safety). Requires a REST API Admin key with write capabilities.
+.TP
+.B \-i, \-\-ip \fIADDRESS\fR
+Override target FortiGate IP address or hostname.
+.TP
+.B \-t, \-\-token \fITOKEN\fR
+Override FortiGate REST API Access Token.
+.TP
+.B \-p, \-\-port \fIPORT\fR
+Override API connection port (defaults to 443).
+.TP
+.B \-v, \-\-vdom \fIVDOM\fR
+Override target Virtual Domain (defaults to "root").
+.TP
+.B \-k, \-\-verify\-ssl
+Enable HTTPS SSL certificate verification.
+.TP
+.B \-c, \-\-ca\-bundle \fIFILE\fR
+Path to custom CA certificate bundle file (implicitly enables SSL verification).
+
+.SH ENVIRONMENT
+The agent loads default settings from a local \fB.env\fR file or the system environment:
+.TP
+.B GEMINI_API_KEY
+Required. Google Gemini Developer API key.
+.TP
+.B FORTIGATE_IP
+IP address or hostname of the FortiGate firewall.
+.TP
+.B FORTIGATE_TOKEN
+REST API Admin key generated on the FortiGate GUI.
+.TP
+.B FORTIGATE_PORT
+Target HTTPS/HTTP port (default is 443).
+.TP
+.B FORTIGATE_VDOM
+Target Virtual Domain name (default is "root").
+.TP
+.B USE_SSL
+Boolean (True/False) to enable HTTPS protocol (default is True).
+.TP
+.B VERIFY_SSL
+Boolean (True/False) to verify SSL certificates (default is False).
+.TP
+.B CA_BUNDLE
+Path to CA certificate bundle (.pem) file.
+.TP
+.B MOCK_MODE
+Boolean (True/False) to force offline mock simulation.
+.TP
+.B ENABLE_WRITE_ACTIONS
+Boolean (True/False) to enable active configuration write/mitigation actions (default is False).
+
+.SH FILES
+.TP
+.I .env
+Local environment configuration file.
+.TP
+.I fortigate_agent.log
+Execution trace log documenting all HTTP requests, parameters, retry attempts, and AI tool invocations.
+.TP
+.I fortigate-ai-agent.1
+Nroff/troff source file for this manual page.
+
+.SH EXAMPLES
+.TP
+Run automated diagnostics in Mock Mode:
+.B python3 main.py diagnose --mock
+.TP
+Interrogate your firewall interactively about active VPN users:
+.B python3 main.py interactive --ip 192.168.1.99 --token my_token
+.TP
+Silent diagnostics piping JSON report into jq parser:
+.B python3 main.py --json --mock | jq .
+.TP
+View configuration status:
+.B python3 main.py config
+.TP
+Run interactive agent allowing mitigation write actions:
+.B python3 main.py interactive --enable-write
+
+.SH BUGS
+Log issues or review code execution tracks inside the local \fBfortigate_agent.log\fR file.
+
+.SH AUTHORS
+Built by Antigravity AI, Gemini Advanced Agentic Coding Team.

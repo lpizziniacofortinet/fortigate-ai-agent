@@ -1,0 +1,22 @@
+# Sensitive environment & secret files
+.env
+.env.local
+*.env
+
+# Python bytecode & virtual environment
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+env/
+venv/
+ENV/
+
+# Logs
+*.log
+fortigate_agent.log
+
+# IDE & OS files
+.DS_Store
+.vscode/
+.idea/

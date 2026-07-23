@@ -1,0 +1,17 @@
+version: "3.8"
+
+services:
+  agent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: fortigate-ai-agent:latest
+    container_name: fortigate_ai_agent
+    # Automatically load settings from the local .env file
+    env_file:
+      - .env
+    # Mount the local log file to persist trace diagnostics on the host
+    volumes:
+      - ./fortigate_agent.log:/app/fortigate_agent.log
+    # Default command when invoking docker-compose up
+    command: diagnose
