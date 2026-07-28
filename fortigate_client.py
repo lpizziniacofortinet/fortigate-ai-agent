@@ -667,3 +667,138 @@ class FortiGateClient:
                 return self._get("/monitor/router/ospf")
             except Exception as inner_e:
                 raise ConnectionError(f"Could not retrieve OSPF neighbors: {inner_e}")
+
+    def get_sdwan_status(self) -> Dict[str, Any]:
+        """Retrieves SD-WAN member status, health-check performance SLA metrics (latency, loss, jitter)."""
+        if self.mock:
+            return {
+                "status": "success",
+                "results": [
+                    {
+                        "interface": "port1",
+                        "status": "up",
+                        "health_check": "ISP-A-SLA",
+                        "latency_ms": 14.2,
+                        "jitter_ms": 1.8,
+                        "packet_loss_pct": 0.0,
+                        "sla_status": "pass"
+                    },
+                    {
+                        "interface": "port2",
+                        "status": "down",
+                        "health_check": "ISP-B-SLA",
+                        "latency_ms": 0.0,
+                        "jitter_ms": 0.0,
+                        "packet_loss_pct": 100.0,
+                        "sla_status": "fail"
+                    }
+                ]
+            }
+
+        try:
+            return self._get("/monitor/virtual-wan/health-check")
+        except Exception as e:
+            logger.warning(f"Could not fetch SD-WAN health check: {e}. Trying member status fallback...")
+            try:
+                return self._get("/monitor/virtual-wan/members")
+            except Exception as inner_e:
+                logger.info(f"SD-WAN monitoring endpoints unavailable or not configured: {inner_e}")
+                return {"status": "not_configured", "results": [], "message": "SD-WAN is not configured or endpoint is restricted."}
+
+    def get_ha_status(self) -> Dict[str, Any]:
+        """Retrieves High Availability (HA) cluster member status, sync state, and checksums."""
+        if self.mock:
+            return {
+                "status": "success",
+                "results": {
+                    "mode": "active-passive",
+                    "group_id": 0,
+                    "sync_status": "in-sync",
+                    "checksum_match": True,
+                    "members": [
+                        {
+                            "serial": "FGT60E3G18012345",
+                            "hostname": "FG-HQ-Primary",
+                            "role": "master",
+                            "priority": 200,
+                            "cpu": 12.5,
+                            "memory": 45.8,
+                            "status": "ok"
+                        },
+                        {
+                            "serial": "FGT60E3G18054321",
+                            "hostname": "FG-HQ-Secondary",
+                            "role": "slave",
+                            "priority": 100,
+                            "cpu": 8.1,
+                            "memory": 42.0,
+                            "status": "ok"
+                        }
+                    ]
+                }
+            }
+
+        try:
+            return self._get("/monitor/system/ha-checksum")
+        except Exception as e:
+            logger.warning(f"Could not fetch HA checksums: {e}. Trying /monitor/system/ha fallback...")
+            try:
+                return self._get("/monitor/system/ha")
+            except Exception as inner_e:
+                logger.info(f"HA cluster monitoring endpoints unavailable (likely standalone unit): {inner_e}")
+                return {
+                    "status": "standalone",
+                    "results": {
+                        "mode": "standalone",
+                        "sync_status": "standalone",
+                        "members": []
+                    },
+                    "message": "Device operating in standalone mode (HA not enabled)."
+                }
+
+    def toggle_firewall_policy(self, policy_id: int, status: str) -> Dict[str, Any]:
+        """
+        Toggles the administrative state of a firewall policy ('enable' or 'disable').
+        """
+        status = status.strip().lower()
+        if status not in ("enable", "disable"):
+            raise ValueError("Status parameter must be 'enable' or 'disable'.")
+
+        if self.mock:
+            return {
+                "status": "success",
+                "message": f"[Mock Mode] Successfully set firewall policy ID '{policy_id}' status to '{status}'."
+            }
+
+        return self._put(f"/cmdb/firewall/policy/{policy_id}", json_data={"status": status})
+
+    def disconnect_ssl_vpn_user(self, username: str) -> Dict[str, Any]:
+        """
+        Disconnects an active SSL-VPN user session.
+        """
+        username = username.strip()
+        if not username:
+            raise ValueError("Username parameter must not be empty.")
+
+        if self.mock:
+            return {
+                "status": "success",
+                "message": f"[Mock Mode] Successfully disconnected SSL-VPN session for user '{username}'."
+            }
+
+        return self._post("/monitor/vpn/ssl/disconnect", json_data={"user": username})
+
+    def get_vdom_list(self) -> Dict[str, Any]:
+        """Retrieves the list of configured Virtual Domains (VDOMs) on the FortiGate."""
+        if self.mock:
+            return {
+                "status": "success",
+                "results": [
+                    {"name": "root", "short_name": "root", "vcluster_id": 1},
+                    {"name": "DMZ-VDOM", "short_name": "dmz_vdom", "vcluster_id": 1},
+                    {"name": "Guest-VDOM", "short_name": "guest_vdom", "vcluster_id": 1}
+                ]
+            }
+
+        return self._get("/cmdb/system/vdom")
+

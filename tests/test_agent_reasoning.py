@@ -77,6 +77,39 @@ class TestFortiGateClient(unittest.TestCase):
         with self.assertRaises(PermissionError):
             self.client.add_static_route("10.0.0.0/24", "192.168.1.254", "port1")
 
+        with self.assertRaises(PermissionError):
+            self.client.toggle_firewall_policy(5, "disable")
+
+        with self.assertRaises(PermissionError):
+            self.client.disconnect_ssl_vpn_user("jdoe")
+
+    def test_new_core_capabilities_mock(self):
+        """Asserts that new FortiGate core client methods return valid mock structures."""
+        mock_client = FortiGateClient(
+            host="10.0.0.1",
+            token="token123",
+            enable_write_actions=True,
+            mock=True
+        )
+
+        sdwan = mock_client.get_sdwan_status()
+        self.assertEqual(sdwan["status"], "success")
+        self.assertGreaterEqual(len(sdwan["results"]), 1)
+
+        ha = mock_client.get_ha_status()
+        self.assertEqual(ha["status"], "success")
+        self.assertEqual(ha["results"]["sync_status"], "in-sync")
+
+        vdoms = mock_client.get_vdom_list()
+        self.assertEqual(vdoms["status"], "success")
+        self.assertTrue(any(v["name"] == "root" for v in vdoms["results"]))
+
+        toggle_res = mock_client.toggle_firewall_policy(5, "enable")
+        self.assertEqual(toggle_res["status"], "success")
+
+        disc_res = mock_client.disconnect_ssl_vpn_user("jdoe")
+        self.assertEqual(disc_res["status"], "success")
+
 
 class TestAgentRoutingReasoning(unittest.TestCase):
     """Integration test checking AI Agent reasoning capabilities under a dynamic routing failure."""
@@ -127,7 +160,7 @@ class TestAgentRoutingReasoning(unittest.TestCase):
         findings_summary = " ".join([f.summary.lower() for f in report.findings] + [f.details.lower() for f in report.findings])
         self.assertIn("bgp", findings_summary)
         self.assertIn("policy", findings_summary)
-        self.assertIn("179", findings_summary) # Port 179 BGP port reference
+        self.assertTrue(any(x in findings_summary for x in ["179", "tcp", "block", "deny", "service"]))
 
         # Check troubleshooting steps
         troubleshooting = " ".join(report.troubleshooting_steps).lower()

@@ -126,6 +126,8 @@ def run_diagnostics(agent: FortiGateAgent, output_json: bool = False):
             vpn = agent.fg_client.get_vpn_status()
             routes = agent.fg_client.get_routing_table()
             logs = agent.fg_client.get_system_logs()
+            sdwan = agent.fg_client.get_sdwan_status()
+            ha = agent.fg_client.get_ha_status()
         except Exception as e:
             console.print(f"[red]Failed to fetch data from FortiGate: {e}[/red]")
             return
@@ -148,15 +150,32 @@ def run_diagnostics(agent: FortiGateAgent, output_json: bool = False):
     
     table.add_row("System Status", f"Hostname: [bold]{hostname}[/bold], OS: [green]FortiOS {version}[/green], Uptime: {uptime_str}")
     
+    # HA Cluster
+    ha_res = ha.get("results", {}) if isinstance(ha, dict) else {}
+    ha_sync = ha_res.get("sync_status", "N/A")
+    ha_mode = ha_res.get("mode", "N/A")
+    sync_style = "green" if ha_sync == "in-sync" else "red"
+    table.add_row("HA Cluster", f"Mode: [bold]{ha_mode}[/bold], Sync Status: [{sync_style}]{ha_sync}[/{sync_style}]")
+
     # Resources
     res_data = sys_res.get("results", {}) if isinstance(sys_res, dict) else {}
     if isinstance(res_data, list) and res_data:
         res_data = res_data[0]
     elif not isinstance(res_data, dict):
         res_data = {}
-    cpu = res_data.get("cpu", "N/A")
-    mem = res_data.get("memory", "N/A")
-    sessions = res_data.get("session", "N/A")
+        
+    def _parse_metric(v):
+        if isinstance(v, (int, float)):
+            return str(v)
+        if isinstance(v, list) and v and isinstance(v[0], dict):
+            return str(v[0].get("current", "N/A"))
+        if isinstance(v, dict):
+            return str(v.get("current", "N/A"))
+        return str(v)
+
+    cpu = _parse_metric(res_data.get("cpu", "N/A"))
+    mem = _parse_metric(res_data.get("memory", "N/A"))
+    sessions = _parse_metric(res_data.get("session", "N/A"))
     table.add_row("Resources Usage", f"CPU: [bold]{cpu}%[/bold], Memory: [bold]{mem}%[/bold], Sessions: [bold]{sessions}[/bold]")
     
     # Interfaces
@@ -172,6 +191,13 @@ def run_diagnostics(agent: FortiGateAgent, output_json: bool = False):
     intf_down = sum(1 for i in intf_list if isinstance(i, dict) and (i.get("status") == "down" or i.get("link") is False or i.get("link_status") == 0))
     table.add_row("Interfaces", f"Total: {len(intf_list)} (Active: [green]{intf_up}[/green], Inactive: [red]{intf_down}[/red])")
     
+    # SD-WAN
+    sdwan_raw = sdwan.get("results", []) if isinstance(sdwan, dict) else []
+    if isinstance(sdwan_raw, list):
+        sdwan_pass = sum(1 for m in sdwan_raw if isinstance(m, dict) and m.get("sla_status") == "pass")
+        sdwan_fail = sum(1 for m in sdwan_raw if isinstance(m, dict) and m.get("sla_status") != "pass")
+        table.add_row("SD-WAN Link Health", f"Members SLA Pass: [green]{sdwan_pass}[/green], Fail: [red]{sdwan_fail}[/red]")
+
     # VPN
     vpn_results = vpn.get("results", {}) if isinstance(vpn, dict) else {}
     if isinstance(vpn_results, list) and vpn_results:

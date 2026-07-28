@@ -224,6 +224,85 @@ def get_ospf_neighbors() -> Dict[str, Any]:
     client = get_fg_client()
     return client.get_ospf_neighbors()
 
+def get_sdwan_status() -> Dict[str, Any]:
+    """
+    Get SD-WAN interface member states and performance SLA metrics (latency, jitter, packet loss).
+    Use this to check WAN link health, SLA status (pass/fail), and packet loss on internet links.
+    """
+    client = get_fg_client()
+    return client.get_sdwan_status()
+
+def get_ha_status() -> Dict[str, Any]:
+    """
+    Get High Availability (HA) cluster status, peer member node health, role (master/slave), and checksum sync status.
+    Use this to verify if HA nodes are in-sync or if cluster failover/sync issues exist.
+    """
+    client = get_fg_client()
+    return client.get_ha_status()
+
+def toggle_firewall_policy(policy_id: int, status: str) -> Dict[str, Any]:
+    """
+    Toggle the administrative state of a firewall policy (enable or disable).
+    Use this to enable a disabled policy or disable a policy that is blocking legitimate traffic.
+    
+    Parameters:
+    - policy_id: The numerical ID of the firewall security policy (e.g. 5).
+    - status: Target status, must be 'enable' or 'disable'.
+    """
+    import sys
+    client = get_fg_client()
+    
+    if not client.enable_write_actions:
+        raise PermissionError(
+            "Write/Mitigation actions are currently disabled. Set ENABLE_WRITE_ACTIONS=True in .env "
+            "or use the --enable-write CLI flag, and ensure your API key has write permissions."
+        )
+
+    if sys.stdin.isatty():
+        from rich.console import Console
+        from rich.prompt import Confirm
+        console = Console()
+        console.print(f"\n[bold yellow]⚠️  WARNING: AI Agent requested to TOGGLE firewall policy ID [bold cyan]{policy_id}[/bold cyan] to [bold cyan]{status}[/bold cyan][/bold yellow]")
+        if not Confirm.ask("Do you authorize this operation?"):
+            raise PermissionError("User rejected the firewall policy toggle operation.")
+
+    return client.toggle_firewall_policy(policy_id=policy_id, status=status)
+
+def disconnect_ssl_vpn_user(username: str) -> Dict[str, Any]:
+    """
+    Forcefully disconnect an active SSL-VPN user session.
+    Use this to terminate suspicious or unauthorized user sessions.
+    
+    Parameters:
+    - username: The SSL-VPN user account name to terminate (e.g. 'jdoe').
+    """
+    import sys
+    client = get_fg_client()
+    
+    if not client.enable_write_actions:
+        raise PermissionError(
+            "Write/Mitigation actions are currently disabled. Set ENABLE_WRITE_ACTIONS=True in .env "
+            "or use the --enable-write CLI flag, and ensure your API key has write permissions."
+        )
+
+    if sys.stdin.isatty():
+        from rich.console import Console
+        from rich.prompt import Confirm
+        console = Console()
+        console.print(f"\n[bold yellow]⚠️  WARNING: AI Agent requested to DISCONNECT SSL-VPN session for user: [bold cyan]{username}[/bold cyan][/bold yellow]")
+        if not Confirm.ask("Do you authorize this operation?"):
+            raise PermissionError("User rejected the SSL-VPN disconnect operation.")
+
+    return client.disconnect_ssl_vpn_user(username=username)
+
+def get_vdom_list() -> Dict[str, Any]:
+    """
+    Get the list of configured Virtual Domains (VDOMs) on the FortiGate firewall.
+    Use this to inspect multi-VDOM environments and view configured VDOM partitions.
+    """
+    client = get_fg_client()
+    return client.get_vdom_list()
+
 
 # List of all tools to expose to Gemini
 FORTIGATE_TOOLS = [
@@ -236,9 +315,14 @@ FORTIGATE_TOOLS = [
     get_bgp_neighbors,
     get_ospf_neighbors,
     get_firewall_policies,
+    get_sdwan_status,
+    get_ha_status,
+    get_vdom_list,
     reset_vpn_tunnel,
     toggle_interface,
-    add_static_route
+    add_static_route,
+    toggle_firewall_policy,
+    disconnect_ssl_vpn_user
 ]
 
 SYSTEM_INSTRUCTION = """
@@ -247,9 +331,11 @@ You have access to tools that query and modify a target FortiGate firewall's RES
 
 Your role is to help the user diagnose, inspect, verify, and restore the health of their FortiGate unit.
 When responding to requests:
-1. Use your tools to fetch necessary data (e.g., get_system_status, get_system_resources, get_interfaces, get_vpn_status, get_routing_table, get_system_logs, get_bgp_neighbors, get_ospf_neighbors, get_firewall_policies).
+1. Use your tools to fetch necessary data (e.g., get_system_status, get_system_resources, get_interfaces, get_vpn_status, get_routing_table, get_system_logs, get_bgp_neighbors, get_ospf_neighbors, get_firewall_policies, get_sdwan_status, get_ha_status, get_vdom_list).
 2. Analyze the outputs carefully:
    - Check if any interfaces are unexpectedly down (especially WAN interfaces with a link status of 'down').
+   - Check SD-WAN health metrics (get_sdwan_status) for packet loss, high latency/jitter, or SLA failure.
+   - Check HA cluster status (get_ha_status) for sync status ('in-sync' vs out-of-sync checksums) and node health.
    - Check for resource bottlenecks (e.g., CPU/Memory usage above 80%).
    - Inspect VPN tunnels for disconnects (status 'down' for configured tunnels) or active SSL-VPN session anomalies.
    - Verify BGP dynamic routing status (get_bgp_neighbors) to check if BGP peers are 'Established' or down ('Active', 'Idle').
@@ -257,7 +343,7 @@ When responding to requests:
    - Inspect firewall security policies (get_firewall_policies) to check if policies block necessary dynamic routing protocols (like BGP TCP port 179) or specific traffic routes.
    - Verify that there is a default route (0.0.0.0/0) in the routing table and trace how routes route traffic.
    - Read system logs (get_system_logs) to troubleshoot issues, find login failures, or explain why VPN connection attempts failed.
-3. You have access to active configuration write tools: `reset_vpn_tunnel`, `toggle_interface`, and `add_static_route`.
+3. You have access to active configuration write tools: `reset_vpn_tunnel`, `toggle_interface`, `add_static_route`, `toggle_firewall_policy`, and `disconnect_ssl_vpn_user`.
    - BEFORE invoking any write action, explain to the user exactly what you propose to do.
    - If the client fails with a PermissionError, explain to the user that write/mitigation actions are disabled (they must set `ENABLE_WRITE_ACTIONS=True` in their environment or .env file) or that their FortiGate REST API token lacks write permissions. Suggest equivalent CLI commands they can execute manually.
 4. Be professional, structured, and clear. Format your reports and answers with Markdown tables, bold key metrics, and bulleted lists.

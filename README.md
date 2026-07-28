@@ -15,13 +15,17 @@ It also features a high-fidelity **Mock Mode** for offline testing and demonstra
 
 The agent calls the following standard FortiOS API paths to gather details:
 - **System Status**: `GET /api/v2/monitor/system/status` (falls back to config `GET /api/v2/cmdb/system/global` if restricted)
+- **HA Cluster & Sync**: `GET /api/v2/monitor/system/ha-checksum` (falls back to `/monitor/system/ha`)
 - **System Resources**: `GET /api/v2/monitor/system/resource/usage` (CPU, memory, session count)
 - **Network Interfaces**: `GET /api/v2/monitor/system/interface` (status, speed, duplex, IP, and traffic counts)
+- **SD-WAN Link Health**: `GET /api/v2/monitor/virtual-wan/health-check` (falls back to `/monitor/virtual-wan/members` for SLA metrics, latency, jitter, and packet loss)
 - **VPN Tunnels**: `GET /api/v2/monitor/vpn/ipsec` and `GET /api/v2/monitor/vpn/ssl` (IPsec tunnel status and SSL-VPN active user sessions)
+- **SSL-VPN Disconnect**: `POST /api/v2/monitor/vpn/ssl/disconnect` (active session termination)
 - **Routing Table**: `GET /api/v2/monitor/router/ipv4` (active IPv4 routing table entries)
 - **BGP Dynamic Routing**: `GET /api/v2/monitor/router/bgp/neighbors` (BGP peer status)
 - **OSPF Dynamic Routing**: `GET /api/v2/monitor/router/ospf/neighbors` (falls back to `/monitor/router/ospf` depending on version)
-- **Firewall Policies**: `GET /api/v2/cmdb/firewall/policy` (configured firewall access control entries)
+- **Firewall Policies**: `GET /api/v2/cmdb/firewall/policy` (configured access control policies and status toggling via `PUT`)
+- **Virtual Domains (VDOMs)**: `GET /api/v2/cmdb/system/vdom` (configured VDOM partitions)
 - **Event Logs**: `GET /api/v2/monitor/log/disk/messages` (falls back to `GET /api/v2/monitor/log/current` depending on firmware version)
 
 For authentication, the script utilizes the secure **`Authorization: Bearer <API-TOKEN>`** HTTP header, conforming to modern FortiOS standards (v7.4.x / v7.6.x+).
@@ -122,7 +126,7 @@ Available options:
 By default, the AI Agent operates in a strictly **Read-Only** monitoring mode to prevent accidental configuration errors.
 
 ### Enabling Write Actions
-To allow the agent to execute active remediations (such as restarting VPN tunnels, bouncing network interfaces, or adding static routes), you must explicitly enable write actions using one of two methods:
+To allow the agent to execute active remediations (such as restarting VPN tunnels, bouncing network interfaces, adding static routes, enabling/disabling firewall policies, or disconnecting SSL-VPN users), you must explicitly enable write actions using one of two methods:
 1. In your `.env` file:
    ```ini
    ENABLE_WRITE_ACTIONS=True
