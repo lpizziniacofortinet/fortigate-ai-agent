@@ -118,6 +118,7 @@ Available options:
 * `--vdom`, `-v`: Override the target VDOM configuration (default: `"root"`).
 * `--verify-ssl`, `-k`: Enable SSL certificate checks.
 * `--ca-bundle`, `-c`: Path to a custom CA certificate bundle file (enables certificate verification).
+* `--model`: Override the Gemini AI model (e.g., `gemini-2.5-pro`, `gemini-2.5-flash`).
 
 ---
 

@@ -37,19 +37,23 @@ from agent import FortiGateAgent
 
 console = Console()
 
+from rich.align import Align
+from rich.text import Text
+
 def display_welcome_banner():
     """Displays a premium ASCII and text welcome banner."""
-    banner_text = """
-    ███████╗  ██████╗  ██████╗  ████████╗ ██╗  ██████╗  █████╗  ████████╗ ███████╗
-    ██╔════╝ ██╔═══██╗ ██╔══██╗ ╚══██╔══╝ ██║ ██╔════╝ ██╔══██╗ ╚══██╔══╝ ██╔════╝
-    █████╗   ██║   ██║ ██████╔╝    ██║    ██║ ██║  ███╗ ███████║    ██║    █████╗  
-    ██╔══╝   ██║   ██║ ██╔══██╗    ██║    ██║ ██║   ██║ ██╔══██║    ██║    ██╔══╝  
-    ██║      ╚██████╔╝ ██║  ██║    ██║    ██║ ╚██████╔╝ ██║  ██║    ██║    ███████╗
-    ╚═╝       ╚═════╝  ╚═╝  ╚═╝    ╚═╝    ╚═╝  ╚═════╝  ╚═╝  ╚═╝    ╚═╝    ╚══════╝
-                            
-                    [bold purple]FortiGate AI Operations & Diagnostics Agent[/bold purple]
-    """
-    console.print(Panel(banner_text.strip(), border_style="purple"))
+    ascii_art = (
+        "███████╗ ██████╗ ██████╗ ████████╗██╗██████╗  █████╗ ████████╗███████╗\n"
+        "██╔════╝██╔═══██╗██╔══██╗╚══██╔══╝██║██╔════╝ ██╔══██╗╚══██╔══╝██╔════╝\n"
+        "█████╗  ██║   ██║██████╔╝   ██║   ██║██║  ███╗███████║   ██║   █████╗  \n"
+        "██╔══╝  ██║   ██║██╔══██╗   ██║   ██║██║   ██║██╔══██║   ██║   ██╔══╝  \n"
+        "██║     ╚██████╔╝██║  ██║   ██║   ██║╚██████╔╝██║  ██║   ██║   ███████╗\n"
+        "╚═╝      ╚═════╝ ╚═╝  ╚═╝   ╚═╝   ╚═╝ ╚═════╝ ╚═╝  ╚═╝   ╚═╝   ╚══════╝"
+    )
+    banner_content = Align.center(
+        Text(ascii_art, style="bold cyan") + "\n\n" + Text("FortiGate AI Operations & Diagnostics Agent", style="bold purple")
+    )
+    console.print(Panel(banner_content, border_style="purple", expand=False))
 
 def ensure_api_key():
     """Checks for the Gemini API Key. If missing, prompts the user to enter it."""
@@ -143,12 +147,21 @@ def run_diagnostics(agent: FortiGateAgent, output_json: bool = False):
         status_res = status_res[0]
     elif not isinstance(status_res, dict):
         status_res = {}
-    hostname = status_res.get("hostname", "Unknown")
-    version = status_res.get("version", "Unknown")
-    uptime_sec = status_res.get("uptime", 0) if isinstance(status_res.get("uptime"), (int, float)) else 0
-    uptime_str = f"{uptime_sec // 86400}d {(uptime_sec % 86400) // 3600}h {(uptime_sec % 3600) // 60}m"
+        
+    hostname = status_res.get("hostname") or sys_status.get("hostname", "Unknown")
+    version = sys_status.get("version") or status_res.get("version", "Unknown")
+    build = sys_status.get("build") or status_res.get("build", "")
+    build_str = f" (build {build})" if build else ""
+    model = status_res.get("model_number") or status_res.get("model_name") or status_res.get("model", "")
+    model_str = f" [{model}]" if model else ""
     
-    table.add_row("System Status", f"Hostname: [bold]{hostname}[/bold], OS: [green]FortiOS {version}[/green], Uptime: {uptime_str}")
+    uptime_sec = status_res.get("uptime") or sys_status.get("uptime") or 0
+    if isinstance(uptime_sec, (int, float)) and uptime_sec > 0:
+        uptime_str = f"{uptime_sec // 86400}d {(uptime_sec % 86400) // 3600}h {(uptime_sec % 3600) // 60}m"
+    else:
+        uptime_str = "N/A"
+    
+    table.add_row("System Status", f"Hostname: [bold]{hostname}[/bold]{model_str}, OS: [green]FortiOS {version}{build_str}[/green], Uptime: {uptime_str}")
     
     # HA Cluster
     ha_res = ha.get("results", {}) if isinstance(ha, dict) else {}
@@ -174,7 +187,7 @@ def run_diagnostics(agent: FortiGateAgent, output_json: bool = False):
         return str(v)
 
     cpu = _parse_metric(res_data.get("cpu", "N/A"))
-    mem = _parse_metric(res_data.get("memory", "N/A"))
+    mem = _parse_metric(res_data.get("mem") or res_data.get("memory", "N/A"))
     sessions = _parse_metric(res_data.get("session", "N/A"))
     table.add_row("Resources Usage", f"CPU: [bold]{cpu}%[/bold], Memory: [bold]{mem}%[/bold], Sessions: [bold]{sessions}[/bold]")
     
@@ -209,10 +222,22 @@ def run_diagnostics(agent: FortiGateAgent, output_json: bool = False):
         ipsec_tunnels = list(ipsec_tunnels.values())
     elif not isinstance(ipsec_tunnels, list):
         ipsec_tunnels = []
-    ipsec_up = sum(1 for t in ipsec_tunnels if isinstance(t, dict) and (t.get("status") == "up" or t.get("link") is True))
-    ipsec_down = sum(1 for t in ipsec_tunnels if isinstance(t, dict) and (t.get("status") == "down" or t.get("link") is False))
+        
+    def _is_ipsec_up(t: dict) -> bool:
+        if not isinstance(t, dict):
+            return False
+        if t.get("status") == "up" or t.get("link") is True or t.get("connection_count", 0) > 0:
+            return True
+        proxyid = t.get("proxyid", [])
+        if isinstance(proxyid, list) and any(isinstance(p, dict) and p.get("status") == "up" for p in proxyid):
+            return True
+        return False
+
+    ipsec_total = len(ipsec_tunnels)
+    ipsec_up = sum(1 for t in ipsec_tunnels if _is_ipsec_up(t))
+    ipsec_down = ipsec_total - ipsec_up
     ssl_sessions = vpn_results.get("ssl_vpn", {}).get("active_sessions_count", 0) if isinstance(vpn_results.get("ssl_vpn"), dict) else 0
-    table.add_row("VPN Tunnels & Sessions", f"IPsec Up: [green]{ipsec_up}[/green]/[red]{ipsec_down}[/red], Active SSL Users: [bold]{ssl_sessions}[/bold]")
+    table.add_row("VPN Tunnels & Sessions", f"IPsec Active: [green]{ipsec_up}/{ipsec_total} Up[/green] (Down: [red]{ipsec_down}[/red]), Active SSL Users: [bold]{ssl_sessions}[/bold]")
     
     # Routing
     route_raw = routes.get("results", []) if isinstance(routes, dict) else []
@@ -371,12 +396,18 @@ def parse_args():
         "--ca-bundle", "-c",
         help="Path to custom CA certificate bundle (enables verification)."
     )
+    parser.add_argument(
+        "--model",
+        help="Override Gemini model name (e.g. gemini-2.5-flash, gemini-2.5-pro, gemini-1.5-pro)."
+    )
     return parser.parse_args()
 
 def main():
     args = parse_args()
 
     # Apply CLI overrides to Config
+    if args.model:
+        Config.GEMINI_MODEL = args.model
     if args.mock:
         Config.MOCK_MODE = True
     if args.ip:

@@ -208,7 +208,16 @@ class FortiGateClient:
 
         try:
             # We first try monitor/system/status
-            return self._get("/monitor/system/status")
+            resp = self._get("/monitor/system/status")
+            if isinstance(resp, dict) and isinstance(resp.get("results"), dict):
+                res_dict = resp["results"]
+                if "version" not in res_dict and "version" in resp:
+                    res_dict["version"] = resp["version"]
+                if "serial" not in res_dict and "serial" in resp:
+                    res_dict["serial"] = resp["serial"]
+                if "build" not in res_dict and "build" in resp:
+                    res_dict["build"] = resp["build"]
+            return resp
         except Exception as e:
             logger.warning(f"Could not retrieve monitor/system/status, trying cmdb fallback: {e}")
             # Fallback to cmdb global config to extract details
