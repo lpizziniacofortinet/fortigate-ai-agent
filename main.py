@@ -439,6 +439,15 @@ def main():
     else:
         display_welcome_banner()
         Config.print_status()
+        if "2.5" in Config.GEMINI_MODEL or "flash" in Config.GEMINI_MODEL.lower():
+            console.print(Panel(
+                f"[yellow]Current Model ({Config.GEMINI_MODEL}):[/yellow]\n"
+                "Flash & 2.5 series models (e.g. gemini-2.5-flash, gemini-3.5-flash) are optimized for high-speed diagnostics.\n"
+                "For deeper root-cause analysis, multi-step chain-of-thought reasoning, or complex network troubleshooting,\n"
+                "consider upgrading to flagship precision models (e.g. [cyan]gemini-2.5-pro[/cyan], [cyan]gemini-3.1-pro-preview[/cyan], or [cyan]gemini-pro-latest[/cyan]) using [bold]--model <name>[/bold].",
+                title="💡 Gemini Model & Precision Advisory",
+                border_style="yellow"
+            ))
         ensure_api_key()
 
     # Initialize Client
