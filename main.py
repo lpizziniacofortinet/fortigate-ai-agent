@@ -461,14 +461,29 @@ def run_interactive_mode(agent: FortiGateAgent):
         except Exception as e:
             console.print(f"[red]Error during agent processing: {e}[/red]")
 
+DEFAULT_AGENTIC_PROMPT = (
+    "Perform a comprehensive, multi-step autonomous investigation of the FortiGate firewall across all operational subsystems: "
+    "1. System health, CPU/memory utilization, and HA cluster sync. "
+    "2. Network interfaces, SD-WAN member link SLAs (packet loss, latency, jitter), and ARP/DHCP reachability. "
+    "3. Dynamic routing state (BGP peerings and OSPF neighbor adjacencies) and IPv4 routing table. "
+    "4. VPN tunnel connectivity (IPsec Phase 1/2 and active SSL-VPN sessions). "
+    "5. FortiGuard security engine subscriptions (AV, IPS, Web Filter database updates and license expiry). "
+    "6. Active firewall session table, identifying top talkers and high-bandwidth or anomalous flows. "
+    "If any degraded state, link failure, dropped tunnel, routing issue, or security anomaly is detected, "
+    "autonomously pivot to inspect system event logs and firewall security policies to identify the exact root cause, "
+    "and synthesize a prioritized, actionable remediation plan."
+)
+
 def run_agentic_mode(agent: FortiGateAgent, prompt: Optional[str] = None):
     """Runs a multi-step agentic call with chain-of-thought tool execution tracing."""
     if not prompt:
-        prompt = (
-            "Perform an autonomous multi-step investigation of the FortiGate firewall. "
-            "Inspect system health, interfaces, routing table, and VPN status. "
-            "If any interface or routing/VPN anomaly is found, inspect system logs or policies to explain the root cause."
-        )
+        if sys.stdin.isatty():
+            console.print("\n[bold purple]Autonomous Multi-Step Agentic Reasoning[/bold purple]")
+            console.print("Enter your investigative objective, or press [bold cyan]Enter[/bold cyan] for full autonomous health & root-cause sweep:")
+            user_input = Prompt.ask("[cyan]Objective[/cyan]", default="")
+            prompt = user_input.strip() if user_input.strip() else DEFAULT_AGENTIC_PROMPT
+        else:
+            prompt = DEFAULT_AGENTIC_PROMPT
         
     console.print("\n[bold purple]Starting Autonomous Multi-Step Agentic Call...[/bold purple]")
     console.print(f"[cyan]Prompt:[/cyan] {prompt}\n")
@@ -493,6 +508,7 @@ def run_agentic_mode(agent: FortiGateAgent, prompt: Optional[str] = None):
         
     # Display Final Assessment
     console.print(Panel(Markdown(result["final_response"]), title="Final Agentic Assessment", border_style="purple"))
+
 
 def parse_args():
     """Parses command-line arguments for CLI overrides."""
@@ -558,6 +574,10 @@ def parse_args():
     parser.add_argument(
         "--model",
         help="Override Gemini model name (e.g. gemini-2.5-flash, gemini-2.5-pro, gemini-1.5-pro)."
+    )
+    parser.add_argument(
+        "--prompt",
+        help="Custom objective or investigative prompt for autonomous agentic reasoning mode."
     )
     return parser.parse_args()
 
@@ -654,7 +674,7 @@ def main():
             run_interactive_mode(agent)
             return
         elif cmd == "agentic":
-            run_agentic_mode(agent)
+            run_agentic_mode(agent, prompt=args.prompt)
             return
         elif cmd == "config":
             # Configuration was already printed
