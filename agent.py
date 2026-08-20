@@ -346,6 +346,18 @@ def get_quarantined_ips() -> Dict[str, Any]:
     client = get_fg_client()
     return client.get_quarantined_ips()
 
+def get_top_sessions(limit: int = 10, sort_by: str = "bytes") -> Dict[str, Any]:
+    """
+    Get active network sessions from the FortiGate session table, sorted by bandwidth consumption (bytes), packet counts, or duration.
+    Use this to identify top talkers, investigate bandwidth bottlenecks, find high-volume flows, or detect connection floods.
+    
+    Parameters:
+    - limit: Maximum number of top active sessions to retrieve (default: 10).
+    - sort_by: Sorting metric: 'bytes' (default, highest bandwidth), 'packets', or 'duration'.
+    """
+    client = get_fg_client()
+    return client.get_top_sessions(limit=limit, sort_by=sort_by)
+
 def quarantine_ip_address(ip_address: str, duration_seconds: int = 3600, reason: str = "") -> Dict[str, Any]:
     """
     Ban and quarantine a malicious or compromised IP address on the FortiGate firewall.
@@ -396,6 +408,7 @@ FORTIGATE_TOOLS = [
     get_dhcp_leases,
     get_fortiguard_status,
     get_quarantined_ips,
+    get_top_sessions,
     backup_configuration,
     reset_vpn_tunnel,
     toggle_interface,
@@ -411,13 +424,14 @@ You have access to tools that query and modify a target FortiGate firewall's RES
 
 Your role is to help the user diagnose, inspect, verify, and restore the health of their FortiGate unit.
 When responding to requests:
-1. Use your tools to fetch necessary data (e.g., get_system_status, get_system_resources, get_interfaces, get_vpn_status, get_routing_table, get_system_logs, get_bgp_neighbors, get_ospf_neighbors, get_firewall_policies, get_sdwan_status, get_ha_status, get_vdom_list, get_arp_table, get_dhcp_leases, get_fortiguard_status, get_quarantined_ips, backup_configuration).
+1. Use your tools to fetch necessary data (e.g., get_system_status, get_system_resources, get_interfaces, get_vpn_status, get_routing_table, get_system_logs, get_bgp_neighbors, get_ospf_neighbors, get_firewall_policies, get_sdwan_status, get_ha_status, get_vdom_list, get_arp_table, get_dhcp_leases, get_fortiguard_status, get_quarantined_ips, get_top_sessions, backup_configuration).
 2. Analyze the outputs carefully:
    - Check if any interfaces are unexpectedly down (especially WAN interfaces with a link status of 'down').
    - Check SD-WAN health metrics (get_sdwan_status) for packet loss, high latency/jitter, or SLA failure.
    - Check HA cluster status (get_ha_status) for sync status ('in-sync' vs out-of-sync checksums) and node health.
    - Check FortiGuard security subscriptions (get_fortiguard_status) to ensure AntiVirus, IPS, and Web Filter licenses are active and threat signatures are up to date.
    - Inspect active bans and quarantined hosts (get_quarantined_ips) to assess threat containment.
+   - Inspect active session table and top talkers (get_top_sessions) to diagnose high bandwidth consumption, heavy flows, or connection spikes.
    - Check for resource bottlenecks (e.g., CPU/Memory usage above 80%).
    - Inspect VPN tunnels for disconnects (status 'down' for configured tunnels) or active SSL-VPN session anomalies.
    - Verify BGP dynamic routing status (get_bgp_neighbors) to check if BGP peers are 'Established' or down ('Active', 'Idle').

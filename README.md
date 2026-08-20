@@ -1,6 +1,6 @@
 # FortiGate AI Operations & Diagnostics Agent
 
-A production-ready AI operations and troubleshooting agent written in Python that interfaces directly with FortiGate firewalls running FortiOS (v7.0+) using the modern **`google-genai`** SDK. The agent is equipped with 23 custom function-calling tools that enable it to dynamically retrieve, inspect, correlate, and remediate network configurations, resource utilization, interfaces, SD-WAN health metrics, VPN tunnels, dynamic routing adjacencies (BGP & OSPF), ARP tables, DHCP leases, FortiGuard security subscriptions (AV/IPS/WebFilter), quarantined threat actors, firewall security policies, system configuration backups, and event logs.
+A production-ready AI operations and troubleshooting agent written in Python that interfaces directly with FortiGate firewalls running FortiOS (v7.0+) using the modern **`google-genai`** SDK. The agent is equipped with 24 custom function-calling tools that enable it to dynamically retrieve, inspect, correlate, and remediate network configurations, resource utilization, interfaces, active session tables (top talkers), SD-WAN health metrics, VPN tunnels, dynamic routing adjacencies (BGP & OSPF), ARP tables, DHCP leases, FortiGuard security subscriptions (AV/IPS/WebFilter), quarantined threat actors, firewall security policies, system configuration backups, and event logs.
 
 It provides five operational modes:
 1. **Automated Diagnostics**: Gathers operational metrics across all subsystems, passes them to the AI agent, and generates a structured markdown-based health assessment and troubleshooting plan.
@@ -20,6 +20,7 @@ The agent communicates with the standard FortiOS REST API (`/api/v2`) and implem
 - **System Status**: `GET /api/v2/monitor/system/status` (falls back to `GET /api/v2/cmdb/system/global` if restricted)
 - **HA Cluster & Sync**: `GET /api/v2/monitor/system/ha-checksum` (falls back to `GET /api/v2/monitor/system/ha`)
 - **System Resources**: `GET /api/v2/monitor/system/resource/usage` (falls back to `GET /api/v2/monitor/system/resource`)
+- **Active Firewall Sessions & Top Talkers**: `GET /api/v2/monitor/firewall/session` (live traffic flows, top source/dest IPs, port distribution, bandwidth metrics)
 - **Network Interfaces**: `GET /api/v2/monitor/system/interface` (status, speed, duplex, IP, and traffic counts)
 - **Interface State Modification**: `PUT /api/v2/cmdb/system/interface/{interface_name}` (administrative up/down toggle)
 - **SD-WAN Link Health**: `GET /api/v2/monitor/virtual-wan/health-check` (falls back to `GET /api/v2/monitor/virtual-wan/members` for SLA metrics, latency, jitter, and packet loss)
@@ -47,14 +48,15 @@ For authentication, the client utilizes the secure **`Authorization: Bearer <API
 
 ## AI Agent Tools Reference (Function Calling)
 
-The AI Agent exposes 23 Python function-calling tools (`FORTIGATE_TOOLS`) registered directly with the Gemini model via the modern `google-genai` SDK. In interactive or agentic modes, the model autonomously analyzes user queries, selects appropriate tools, executes them, and synthesizes operational findings.
+The AI Agent exposes 24 Python function-calling tools (`FORTIGATE_TOOLS`) registered directly with the Gemini model via the modern `google-genai` SDK. In interactive or agentic modes, the model autonomously analyzes user queries, selects appropriate tools, executes them, and synthesizes operational findings.
 
-### 1. Read-Only Telemetry & Inspection Tools (16 Tools)
+### 1. Read-Only Telemetry & Inspection Tools (17 Tools)
 
 | Tool Name | Parameters | Description / Telemetry Gathered |
 | :--- | :--- | :--- |
 | **`get_system_status`** | _None_ | Retrieves hostname, firmware version, build number, serial number, uptime, HA cluster role, and operation mode. |
 | **`get_system_resources`** | _None_ | Retrieves CPU utilization (%), memory usage (%), active and maximum concurrent sessions, and disk usage. |
+| **`get_top_sessions`** | `limit` (int, default: `10`), `sort_by` (str, default: `"bytes"`) | Retrieves active firewall session table entries, sorted by bandwidth consumption (`bytes`), packets, or duration, plus top talker sources/destinations. |
 | **`get_interfaces`** | _None_ | Inspects network interfaces: administrative and physical link status (up/down), IP assignments, speed, duplex, and Rx/Tx byte/packet counters. |
 | **`get_vpn_status`** | _None_ | Gathers IPsec Phase 1/Phase 2 tunnel states, remote gateways, throughput, and active SSL-VPN user sessions (username, source IP, duration, bytes). |
 | **`get_routing_table`** | _None_ | Retrieves active IPv4 routing table entries, next-hop gateways, egress interface names, administrative distances, and route types (static, connected, dynamic). |

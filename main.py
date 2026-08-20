@@ -237,7 +237,7 @@ def run_diagnostics(agent: FortiGateAgent, output_json: bool = False):
     console.print("\n[bold blue]Starting Full FortiGate Security & Health Diagnostics...[/bold blue]")
     
     # 1. Show local raw metrics summary before LLM report
-    with console.status("[bold green]Querying FortiGate details (Status, Resources, Interfaces, VPN, Routing, FortiGuard, Quarantined IPs, Logs, ARP, DHCP)...") as status:
+    with console.status("[bold green]Querying FortiGate details (Status, Resources, Interfaces, VPN, Routing, FortiGuard, Quarantined IPs, Sessions, Logs, ARP, DHCP)...") as status:
         try:
             sys_status = agent.fg_client.get_system_status()
             sys_res = agent.fg_client.get_system_resources()
@@ -251,6 +251,7 @@ def run_diagnostics(agent: FortiGateAgent, output_json: bool = False):
             dhcp = agent.fg_client.get_dhcp_leases()
             fortiguard = agent.fg_client.get_fortiguard_status()
             quarantined = agent.fg_client.get_quarantined_ips()
+            top_sessions = agent.fg_client.get_top_sessions(limit=5)
         except Exception as e:
             console.print(f"[red]Failed to fetch data from FortiGate: {e}[/red]")
             return
@@ -317,6 +318,13 @@ def run_diagnostics(agent: FortiGateAgent, output_json: bool = False):
     mem = _parse_metric(res_data.get("mem") or res_data.get("memory", "N/A"))
     sessions = _parse_metric(res_data.get("session", "N/A"))
     table.add_row("Resources Usage", f"CPU: [bold]{cpu}%[/bold], Memory: [bold]{mem}%[/bold], Sessions: [bold]{sessions}[/bold]")
+
+    # Top Talkers & Sessions
+    top_src = top_sessions.get("top_source_ips", []) if isinstance(top_sessions, dict) else []
+    if top_src and isinstance(top_src, list):
+        top_src_ip = top_src[0].get("ip", "N/A")
+        top_src_mb = round(top_src[0].get("total_bytes", 0) / (1024 * 1024), 1)
+        table.add_row("Top Talkers (Bandwidth)", f"Top Source: [bold cyan]{top_src_ip}[/bold cyan] ({top_src_mb} MB in active flows)")
     
     # Interfaces
     raw_intf = interfaces.get("results", []) if isinstance(interfaces, dict) else []

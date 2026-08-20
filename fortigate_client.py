@@ -1060,5 +1060,120 @@ class FortiGateClient:
         }
         return self._post("/monitor/user/banned/add", json_data=payload)
 
+    def get_top_sessions(self, limit: int = 10, sort_by: str = "bytes") -> Dict[str, Any]:
+        """
+        Retrieves active network sessions from the FortiGate firewall session table,
+        sorted by bandwidth consumption (bytes), packet counts, or duration.
+        """
+        if self.mock:
+            mock_sessions = [
+                {
+                    "session_id": 10421,
+                    "proto": "tcp",
+                    "proto_name": "HTTPS",
+                    "src_ip": "192.168.1.100",
+                    "src_port": 54122,
+                    "dst_ip": "142.250.190.46",
+                    "dst_port": 443,
+                    "duration": 1840,
+                    "bytes": 2840920140,
+                    "packets": 2104921,
+                    "policy_id": 1,
+                    "interface": "port1",
+                    "nat_src": "198.51.100.2"
+                },
+                {
+                    "session_id": 10422,
+                    "proto": "tcp",
+                    "proto_name": "SMB / File Backup",
+                    "src_ip": "192.168.1.50",
+                    "src_port": 49201,
+                    "dst_ip": "10.0.1.50",
+                    "dst_port": 445,
+                    "duration": 3600,
+                    "bytes": 18492019482,
+                    "packets": 14920192,
+                    "policy_id": 1,
+                    "interface": "dmz",
+                    "nat_src": "none"
+                },
+                {
+                    "session_id": 10423,
+                    "proto": "tcp",
+                    "proto_name": "SSH",
+                    "src_ip": "198.51.100.99",
+                    "src_port": 41209,
+                    "dst_ip": "198.51.100.2",
+                    "dst_port": 22,
+                    "duration": 45,
+                    "bytes": 12840,
+                    "packets": 120,
+                    "policy_id": 5,
+                    "interface": "port1",
+                    "nat_src": "none"
+                },
+                {
+                    "session_id": 10424,
+                    "proto": "udp",
+                    "proto_name": "DNS",
+                    "src_ip": "192.168.1.100",
+                    "src_port": 61240,
+                    "dst_ip": "8.8.8.8",
+                    "dst_port": 53,
+                    "duration": 12,
+                    "bytes": 4820,
+                    "packets": 32,
+                    "policy_id": 1,
+                    "interface": "port1",
+                    "nat_src": "198.51.100.2"
+                },
+                {
+                    "session_id": 10425,
+                    "proto": "tcp",
+                    "proto_name": "HTTPS Cloud Sync",
+                    "src_ip": "192.168.1.101",
+                    "src_port": 58921,
+                    "dst_ip": "52.95.120.34",
+                    "dst_port": 443,
+                    "duration": 720,
+                    "bytes": 524288000,
+                    "packets": 390200,
+                    "policy_id": 1,
+                    "interface": "port1",
+                    "nat_src": "198.51.100.2"
+                }
+            ]
+
+            sort_key = "bytes"
+            if sort_by in ("packets", "duration"):
+                sort_key = sort_by
+            sorted_sessions = sorted(mock_sessions, key=lambda s: s.get(sort_key, 0), reverse=True)[:limit]
+
+            src_bytes = {}
+            dst_bytes = {}
+            for s in sorted_sessions:
+                src_bytes[s["src_ip"]] = src_bytes.get(s["src_ip"], 0) + s["bytes"]
+                dst_bytes[s["dst_ip"]] = dst_bytes.get(s["dst_ip"], 0) + s["bytes"]
+
+            return {
+                "status": "success",
+                "total_active_sessions": 245,
+                "returned_sessions_count": len(sorted_sessions),
+                "sort_by": sort_key,
+                "top_source_ips": sorted([{"ip": ip, "total_bytes": b} for ip, b in src_bytes.items()], key=lambda x: x["total_bytes"], reverse=True),
+                "top_destination_ips": sorted([{"ip": ip, "total_bytes": b} for ip, b in dst_bytes.items()], key=lambda x: x["total_bytes"], reverse=True),
+                "results": sorted_sessions
+            }
+
+        try:
+            params = {"count": limit}
+            if sort_by in ("bytes", "packets", "duration"):
+                params["sort_by"] = sort_by
+            return self._get("/monitor/firewall/session", params=params)
+        except Exception as e:
+            logger.warning(f"Could not retrieve sessions via /monitor/firewall/session: {e}")
+            return {"status": "warning", "results": [], "message": f"Session table query failed: {e}"}
+
+
 
 

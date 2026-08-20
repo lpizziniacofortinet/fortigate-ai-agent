@@ -134,6 +134,13 @@ class TestFortiGateClient(unittest.TestCase):
         self.assertEqual(ban_res["status"], "success")
         self.assertEqual(ban_res["ip"], "198.51.100.99")
 
+        sessions_res = mock_client.get_top_sessions(limit=5, sort_by="bytes")
+        self.assertEqual(sessions_res["status"], "success")
+        self.assertGreaterEqual(len(sessions_res["results"]), 1)
+        self.assertGreaterEqual(len(sessions_res["top_source_ips"]), 1)
+        self.assertEqual(sessions_res["sort_by"], "bytes")
+
+
     def test_dry_run_mode(self):
         """Asserts that dry run mode intercepts write actions safely without execution."""
         dry_run_client = FortiGateClient(
