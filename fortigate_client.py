@@ -955,4 +955,110 @@ class FortiGateClient:
             logger.warning(f"Failed to fetch DHCP leases via /monitor/system/dhcp: {e}. Trying fallback...")
             return self._get("/monitor/system/dhcp/status")
 
+    def get_fortiguard_status(self) -> Dict[str, Any]:
+        """
+        Retrieves FortiGuard security subscription status, package versions, and license expiry.
+        """
+        if self.mock:
+            return {
+                "status": "success",
+                "results": {
+                    "connection": "connected",
+                    "server": "usfortiguard.fortinet.net",
+                    "antivirus": {
+                        "status": "valid",
+                        "version": "92.00124",
+                        "engine_version": "6.00287",
+                        "expiry": "2027-12-31",
+                        "last_update": "2026-08-19 04:12:00"
+                    },
+                    "ips": {
+                        "status": "valid",
+                        "version": "24.00891",
+                        "engine_version": "7.00412",
+                        "expiry": "2027-12-31",
+                        "last_update": "2026-08-19 06:30:00"
+                    },
+                    "web_filter": {
+                        "status": "valid",
+                        "version": "27.00045",
+                        "expiry": "2027-12-31"
+                    },
+                    "industrial_db": {
+                        "status": "valid",
+                        "version": "21.00140",
+                        "expiry": "2027-12-31"
+                    },
+                    "outbreak_prevention": {
+                        "status": "valid",
+                        "expiry": "2027-12-31"
+                    }
+                }
+            }
+
+        try:
+            return self._get("/monitor/system/fortiguard")
+        except Exception as e:
+            logger.warning(f"Failed to fetch FortiGuard status via /monitor/system/fortiguard: {e}. Trying fallback...")
+            try:
+                return self._get("/cmdb/system/fortiguard")
+            except Exception as inner_e:
+                logger.warning(f"Could not retrieve FortiGuard details: {inner_e}")
+                return {"status": "warning", "results": {}, "message": "FortiGuard status query not available or restricted."}
+
+    def get_quarantined_ips(self) -> Dict[str, Any]:
+        """
+        Retrieves currently banned/quarantined IP addresses from the FortiGate user ban table.
+        """
+        if self.mock:
+            return {
+                "status": "success",
+                "results": [
+                    {
+                        "ip": "198.51.100.99",
+                        "created": 1724150000,
+                        "expires": 1724153600,
+                        "source": "admin",
+                        "reason": "Brute-force SSH attack detected"
+                    }
+                ]
+            }
+
+        try:
+            return self._get("/monitor/user/banned")
+        except Exception as e:
+            logger.warning(f"Could not fetch banned users/IPs from /monitor/user/banned: {e}")
+            return {"status": "success", "results": []}
+
+    def quarantine_ip_address(self, ip_address: str, duration_seconds: int = 3600, reason: str = "") -> Dict[str, Any]:
+        """
+        Bans / quarantines an IP address on the FortiGate to immediately block traffic from a malicious or compromised endpoint.
+        """
+        ip_clean = ip_address.strip()
+        if not ip_clean:
+            raise ValueError("IP address must not be empty.")
+
+        precheck = self._execute_write_prechecks("quarantine_ip_address", {
+            "ip_address": ip_clean,
+            "duration_seconds": duration_seconds,
+            "reason": reason
+        })
+        if precheck:
+            return precheck
+
+        if self.mock:
+            return {
+                "status": "success",
+                "message": f"[Mock Mode] Successfully quarantined IP address '{ip_clean}' for {duration_seconds}s. Reason: {reason or 'Threat containment'}",
+                "ip": ip_clean,
+                "duration_seconds": duration_seconds
+            }
+
+        payload = {
+            "ip": ip_clean,
+            "expiry": duration_seconds
+        }
+        return self._post("/monitor/user/banned/add", json_data=payload)
+
+
 

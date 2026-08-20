@@ -237,7 +237,7 @@ def run_diagnostics(agent: FortiGateAgent, output_json: bool = False):
     console.print("\n[bold blue]Starting Full FortiGate Security & Health Diagnostics...[/bold blue]")
     
     # 1. Show local raw metrics summary before LLM report
-    with console.status("[bold green]Querying FortiGate details (Status, Resources, Interfaces, VPN, Routing, Logs, ARP, DHCP)...") as status:
+    with console.status("[bold green]Querying FortiGate details (Status, Resources, Interfaces, VPN, Routing, FortiGuard, Quarantined IPs, Logs, ARP, DHCP)...") as status:
         try:
             sys_status = agent.fg_client.get_system_status()
             sys_res = agent.fg_client.get_system_resources()
@@ -249,6 +249,8 @@ def run_diagnostics(agent: FortiGateAgent, output_json: bool = False):
             ha = agent.fg_client.get_ha_status()
             arp = agent.fg_client.get_arp_table()
             dhcp = agent.fg_client.get_dhcp_leases()
+            fortiguard = agent.fg_client.get_fortiguard_status()
+            quarantined = agent.fg_client.get_quarantined_ips()
         except Exception as e:
             console.print(f"[red]Failed to fetch data from FortiGate: {e}[/red]")
             return
@@ -286,6 +288,14 @@ def run_diagnostics(agent: FortiGateAgent, output_json: bool = False):
     ha_mode = ha_res.get("mode", "N/A")
     sync_style = "green" if ha_sync == "in-sync" else "red"
     table.add_row("HA Cluster", f"Mode: [bold]{ha_mode}[/bold], Sync Status: [{sync_style}]{ha_sync}[/{sync_style}]")
+
+    # FortiGuard & Subscriptions
+    fg_res = fortiguard.get("results", {}) if isinstance(fortiguard, dict) else {}
+    av_stat = fg_res.get("antivirus", {}).get("status", "N/A") if isinstance(fg_res.get("antivirus"), dict) else "N/A"
+    ips_stat = fg_res.get("ips", {}).get("status", "N/A") if isinstance(fg_res.get("ips"), dict) else "N/A"
+    wf_stat = fg_res.get("web_filter", {}).get("status", "N/A") if isinstance(fg_res.get("web_filter"), dict) else "N/A"
+    fg_style = "green" if av_stat == "valid" and ips_stat == "valid" else "yellow"
+    table.add_row("FortiGuard Subscriptions", f"[{fg_style}]AV: {av_stat}, IPS: {ips_stat}, Web Filter: {wf_stat}[/{fg_style}]")
 
     # Resources
     res_data = sys_res.get("results", {}) if isinstance(sys_res, dict) else {}
@@ -372,6 +382,12 @@ def run_diagnostics(agent: FortiGateAgent, output_json: bool = False):
     dhcp_res = dhcp.get("results", []) if isinstance(dhcp, dict) else []
     dhcp_count = len(dhcp_res) if isinstance(dhcp_res, list) else 0
     table.add_row("Network Neighbors & DHCP", f"ARP Entries: [bold]{arp_count}[/bold], Active DHCP Leases: [bold]{dhcp_count}[/bold]")
+
+    # Quarantined & Banned IPs
+    q_res = quarantined.get("results", []) if isinstance(quarantined, dict) else []
+    q_count = len(q_res) if isinstance(q_res, list) else 0
+    q_style = "yellow" if q_count > 0 else "green"
+    table.add_row("Quarantined Threat Hosts", f"[{q_style}]Active IP Bans: {q_count}[/{q_style}]")
 
     # Logs
     log_raw = logs.get("results", []) if isinstance(logs, dict) else []

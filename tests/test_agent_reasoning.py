@@ -83,6 +83,9 @@ class TestFortiGateClient(unittest.TestCase):
         with self.assertRaises(PermissionError):
             self.client.disconnect_ssl_vpn_user("jdoe")
 
+        with self.assertRaises(PermissionError):
+            self.client.quarantine_ip_address("198.51.100.99")
+
     def test_new_core_capabilities_mock(self):
         """Asserts that new FortiGate core client methods return valid mock structures."""
         mock_client = FortiGateClient(
@@ -118,6 +121,19 @@ class TestFortiGateClient(unittest.TestCase):
         self.assertEqual(dhcp_res["status"], "success")
         self.assertGreaterEqual(len(dhcp_res["results"]), 1)
 
+        fg_res = mock_client.get_fortiguard_status()
+        self.assertEqual(fg_res["status"], "success")
+        self.assertEqual(fg_res["results"]["antivirus"]["status"], "valid")
+        self.assertEqual(fg_res["results"]["ips"]["status"], "valid")
+
+        q_res = mock_client.get_quarantined_ips()
+        self.assertEqual(q_res["status"], "success")
+        self.assertGreaterEqual(len(q_res["results"]), 1)
+
+        ban_res = mock_client.quarantine_ip_address("198.51.100.99", duration_seconds=1800, reason="Malicious brute force")
+        self.assertEqual(ban_res["status"], "success")
+        self.assertEqual(ban_res["ip"], "198.51.100.99")
+
     def test_dry_run_mode(self):
         """Asserts that dry run mode intercepts write actions safely without execution."""
         dry_run_client = FortiGateClient(
@@ -134,6 +150,11 @@ class TestFortiGateClient(unittest.TestCase):
 
         route_res = dry_run_client.add_static_route("10.10.0.0/16", "192.168.1.254", "port1")
         self.assertEqual(route_res["status"], "dry_run")
+
+        q_res = dry_run_client.quarantine_ip_address("198.51.100.99", duration_seconds=3600)
+        self.assertEqual(q_res["status"], "dry_run")
+        self.assertIn("DRY RUN", q_res["message"])
+
 
     def test_backup_configuration(self):
         """Asserts that backup_configuration creates a valid backup snapshot file."""

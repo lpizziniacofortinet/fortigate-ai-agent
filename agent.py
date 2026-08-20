@@ -330,6 +330,53 @@ def backup_configuration(destination_dir: str = ".backups") -> Dict[str, Any]:
     client = get_fg_client()
     return client.backup_configuration(destination_dir=destination_dir)
 
+def get_fortiguard_status() -> Dict[str, Any]:
+    """
+    Get FortiGuard security subscription licenses, package database versions, and expiration dates.
+    Use this to audit AntiVirus, IPS, Web Filtering, and Outbreak Prevention signature health.
+    """
+    client = get_fg_client()
+    return client.get_fortiguard_status()
+
+def get_quarantined_ips() -> Dict[str, Any]:
+    """
+    Get the list of currently banned/quarantined IP addresses from the FortiGate ban table.
+    Use this to inspect blocked threat actors, quarantined endpoints, and ban expiration timers.
+    """
+    client = get_fg_client()
+    return client.get_quarantined_ips()
+
+def quarantine_ip_address(ip_address: str, duration_seconds: int = 3600, reason: str = "") -> Dict[str, Any]:
+    """
+    Ban and quarantine a malicious or compromised IP address on the FortiGate firewall.
+    Use this for immediate threat containment when detecting brute-force attacks, port scanning, or malicious traffic.
+    
+    Parameters:
+    - ip_address: The target IPv4 or IPv6 address to quarantine (e.g. '198.51.100.99').
+    - duration_seconds: Ban duration in seconds (default: 3600 = 1 hour, 0 for permanent).
+    - reason: Context or explanation for why the IP is being quarantined.
+    """
+    import sys
+    client = get_fg_client()
+    
+    if not client.enable_write_actions:
+        raise PermissionError(
+            "Write/Mitigation actions are currently disabled. Set ENABLE_WRITE_ACTIONS=True in .env "
+            "or use the --enable-write CLI flag, and ensure your API key has write permissions."
+        )
+
+    if sys.stdin.isatty():
+        from rich.console import Console
+        from rich.prompt import Confirm
+        console = Console()
+        console.print(f"\n[bold red]🚨 CRITICAL WARNING: AI Agent requested to QUARANTINE / BAN IP: [bold white]{ip_address}[/bold white] for {duration_seconds}s[/bold red]")
+        if reason:
+            console.print(f"[yellow]Reason:[/yellow] {reason}")
+        if not Confirm.ask("Do you authorize this quarantine operation?"):
+            raise PermissionError("User rejected the quarantine operation.")
+
+    return client.quarantine_ip_address(ip_address=ip_address, duration_seconds=duration_seconds, reason=reason)
+
 
 # List of all tools to expose to Gemini
 FORTIGATE_TOOLS = [
@@ -347,12 +394,15 @@ FORTIGATE_TOOLS = [
     get_vdom_list,
     get_arp_table,
     get_dhcp_leases,
+    get_fortiguard_status,
+    get_quarantined_ips,
     backup_configuration,
     reset_vpn_tunnel,
     toggle_interface,
     add_static_route,
     toggle_firewall_policy,
-    disconnect_ssl_vpn_user
+    disconnect_ssl_vpn_user,
+    quarantine_ip_address
 ]
 
 SYSTEM_INSTRUCTION = """
@@ -361,11 +411,13 @@ You have access to tools that query and modify a target FortiGate firewall's RES
 
 Your role is to help the user diagnose, inspect, verify, and restore the health of their FortiGate unit.
 When responding to requests:
-1. Use your tools to fetch necessary data (e.g., get_system_status, get_system_resources, get_interfaces, get_vpn_status, get_routing_table, get_system_logs, get_bgp_neighbors, get_ospf_neighbors, get_firewall_policies, get_sdwan_status, get_ha_status, get_vdom_list, get_arp_table, get_dhcp_leases, backup_configuration).
+1. Use your tools to fetch necessary data (e.g., get_system_status, get_system_resources, get_interfaces, get_vpn_status, get_routing_table, get_system_logs, get_bgp_neighbors, get_ospf_neighbors, get_firewall_policies, get_sdwan_status, get_ha_status, get_vdom_list, get_arp_table, get_dhcp_leases, get_fortiguard_status, get_quarantined_ips, backup_configuration).
 2. Analyze the outputs carefully:
    - Check if any interfaces are unexpectedly down (especially WAN interfaces with a link status of 'down').
    - Check SD-WAN health metrics (get_sdwan_status) for packet loss, high latency/jitter, or SLA failure.
    - Check HA cluster status (get_ha_status) for sync status ('in-sync' vs out-of-sync checksums) and node health.
+   - Check FortiGuard security subscriptions (get_fortiguard_status) to ensure AntiVirus, IPS, and Web Filter licenses are active and threat signatures are up to date.
+   - Inspect active bans and quarantined hosts (get_quarantined_ips) to assess threat containment.
    - Check for resource bottlenecks (e.g., CPU/Memory usage above 80%).
    - Inspect VPN tunnels for disconnects (status 'down' for configured tunnels) or active SSL-VPN session anomalies.
    - Verify BGP dynamic routing status (get_bgp_neighbors) to check if BGP peers are 'Established' or down ('Active', 'Idle').
@@ -374,7 +426,8 @@ When responding to requests:
    - Inspect firewall security policies (get_firewall_policies) to check if policies block necessary dynamic routing protocols (like BGP TCP port 179) or specific traffic routes.
    - Verify that there is a default route (0.0.0.0/0) in the routing table and trace how routes route traffic.
    - Read system logs (get_system_logs) to troubleshoot issues, find login failures, or explain why VPN connection attempts failed.
-3. You have access to active configuration write tools: `reset_vpn_tunnel`, `toggle_interface`, `add_static_route`, `toggle_firewall_policy`, `disconnect_ssl_vpn_user`, and `backup_configuration`.
+3. You have access to active configuration write tools: `reset_vpn_tunnel`, `toggle_interface`, `add_static_route`, `toggle_firewall_policy`, `disconnect_ssl_vpn_user`, `quarantine_ip_address`, and `backup_configuration`.
+   - If an attack or malicious source IP is identified, propose quarantining the threat using `quarantine_ip_address`.
    - BEFORE invoking any write action, explain to the user exactly what you propose to do.
    - If the client fails with a PermissionError, explain to the user that write/mitigation actions are disabled (they must set `ENABLE_WRITE_ACTIONS=True` in their environment or .env file) or that their FortiGate REST API token lacks write permissions. Suggest equivalent CLI commands they can execute manually.
 4. Be professional, structured, and clear. Format your reports and answers with Markdown tables, bold key metrics, and bulleted lists.

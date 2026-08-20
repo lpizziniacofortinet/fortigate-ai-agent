@@ -1,6 +1,6 @@
 # FortiGate AI Operations & Diagnostics Agent
 
-A production-ready AI operations and troubleshooting agent written in Python that interfaces directly with FortiGate firewalls running FortiOS (v7.0+) using the modern **`google-genai`** SDK. The agent is equipped with 20 custom function-calling tools that enable it to dynamically retrieve, inspect, correlate, and remediate network configurations, resource utilization, interfaces, SD-WAN health metrics, VPN tunnels, dynamic routing adjacencies (BGP & OSPF), ARP tables, DHCP leases, firewall security policies, system configuration backups, and event logs.
+A production-ready AI operations and troubleshooting agent written in Python that interfaces directly with FortiGate firewalls running FortiOS (v7.0+) using the modern **`google-genai`** SDK. The agent is equipped with 23 custom function-calling tools that enable it to dynamically retrieve, inspect, correlate, and remediate network configurations, resource utilization, interfaces, SD-WAN health metrics, VPN tunnels, dynamic routing adjacencies (BGP & OSPF), ARP tables, DHCP leases, FortiGuard security subscriptions (AV/IPS/WebFilter), quarantined threat actors, firewall security policies, system configuration backups, and event logs.
 
 It provides five operational modes:
 1. **Automated Diagnostics**: Gathers operational metrics across all subsystems, passes them to the AI agent, and generates a structured markdown-based health assessment and troubleshooting plan.
@@ -32,6 +32,9 @@ The agent communicates with the standard FortiOS REST API (`/api/v2`) and implem
 - **OSPF Dynamic Routing**: `GET /api/v2/monitor/router/ospf/neighbors` (falls back to `GET /api/v2/monitor/router/ospf`)
 - **Firewall Policies**: `GET /api/v2/cmdb/firewall/policy` (inspects configured security rules)
 - **Firewall Policy Toggle**: `PUT /api/v2/cmdb/firewall/policy/{policy_id}` (enable or disable specific policies)
+- **FortiGuard Subscriptions**: `GET /api/v2/monitor/system/fortiguard` (falls back to `GET /api/v2/cmdb/system/fortiguard` for AV, IPS, Web Filter, and signature engine levels)
+- **Quarantined / Banned IPs**: `GET /api/v2/monitor/user/banned` (active banned hosts table)
+- **IP Quarantine / Ban**: `POST /api/v2/monitor/user/banned/add` (immediate threat containment)
 - **Virtual Domains (VDOMs)**: `GET /api/v2/cmdb/system/vdom` (configured VDOM partitions)
 - **ARP Table**: `GET /api/v2/monitor/network/arp` (falls back to `GET /api/v2/monitor/system/arp` for Layer 2 MAC mappings)
 - **DHCP Leases**: `GET /api/v2/monitor/system/dhcp` (falls back to `GET /api/v2/monitor/system/dhcp/status` for active IP allocations)
@@ -44,9 +47,9 @@ For authentication, the client utilizes the secure **`Authorization: Bearer <API
 
 ## AI Agent Tools Reference (Function Calling)
 
-The AI Agent exposes 20 Python function-calling tools (`FORTIGATE_TOOLS`) registered directly with the Gemini model via the modern `google-genai` SDK. In interactive or agentic modes, the model autonomously analyzes user queries, selects appropriate tools, executes them, and synthesizes operational findings.
+The AI Agent exposes 23 Python function-calling tools (`FORTIGATE_TOOLS`) registered directly with the Gemini model via the modern `google-genai` SDK. In interactive or agentic modes, the model autonomously analyzes user queries, selects appropriate tools, executes them, and synthesizes operational findings.
 
-### 1. Read-Only Telemetry & Inspection Tools (14 Tools)
+### 1. Read-Only Telemetry & Inspection Tools (16 Tools)
 
 | Tool Name | Parameters | Description / Telemetry Gathered |
 | :--- | :--- | :--- |
@@ -57,6 +60,8 @@ The AI Agent exposes 20 Python function-calling tools (`FORTIGATE_TOOLS`) regist
 | **`get_routing_table`** | _None_ | Retrieves active IPv4 routing table entries, next-hop gateways, egress interface names, administrative distances, and route types (static, connected, dynamic). |
 | **`get_arp_table`** | _None_ | Retrieves IPv4 ARP table mappings (IP, MAC, interface, state) to verify Layer 2 neighbor resolution and reachability. |
 | **`get_dhcp_leases`** | _None_ | Retrieves active DHCP client lease assignments (IP, MAC, hostname, interface, expiration) to troubleshoot client addressing. |
+| **`get_fortiguard_status`** | _None_ | Retrieves FortiGuard subscription licenses, AV/IPS database versions, Web Filter status, and signature expiration dates. |
+| **`get_quarantined_ips`** | _None_ | Retrieves the list of currently banned/quarantined IP addresses, ban reasons, and expiration timers from the FortiGate user ban table. |
 | **`get_system_logs`** | `log_type` (str, default: `"event"`), `limit` (int, default: `15`) | Fetches recent event, traffic, or security log entries with timestamps, severity levels (warning, info, notice), subtypes, and messages. |
 | **`get_bgp_neighbors`** | _None_ | Checks BGP dynamic routing peer states (`Established`, `Active`, `Idle`), remote AS numbers, uptime, and advertised/received route counts. |
 | **`get_ospf_neighbors`** | _None_ | Checks OSPF dynamic routing neighbor states (`Full`, `Init`, `Attempt`, `Down`), neighbor router IDs, priorities, and interfaces. |
@@ -65,7 +70,7 @@ The AI Agent exposes 20 Python function-calling tools (`FORTIGATE_TOOLS`) regist
 | **`get_ha_status`** | _None_ | Monitors High Availability (HA) cluster status, peer members, sync state (`in-sync`/out-of-sync), and checksum matches. |
 | **`get_vdom_list`** | _None_ | Lists configured Virtual Domains (VDOMs) and cluster partition IDs for multi-tenant deployments. |
 
-### 2. Active Remediation & Write Tools (6 Tools)
+### 2. Active Remediation & Write Tools (7 Tools)
 
 > [!NOTE]
 > All write tools require `ENABLE_WRITE_ACTIONS=True` (or `--enable-write` CLI flag) and an API token with read-write permissions. In interactive terminal sessions, the agent will always request explicit confirmation (`y/N`) before modifying any configuration. When `DRY_RUN=True` or `--dry-run` is specified, write actions are safely simulated.
@@ -73,11 +78,13 @@ The AI Agent exposes 20 Python function-calling tools (`FORTIGATE_TOOLS`) regist
 | Tool Name | Parameters | Target Remediation Action |
 | :--- | :--- | :--- |
 | **`backup_configuration`** | `destination_dir` (str, default: `".backups"`) | Downloads and saves a complete timestamped configuration snapshot (.conf) locally. |
+| **`quarantine_ip_address`** | `ip_address` (str), `duration_seconds` (int, default: `3600`), `reason` (str, default: `""`) | Bans and quarantines a malicious or compromised IP address on the FortiGate firewall. |
 | **`reset_vpn_tunnel`** | `p1_name` (str) | Flushes and resets an IPsec Phase 1 VPN tunnel to restart IKE/IPsec negotiations. |
 | **`toggle_interface`** | `interface_name` (str), `status` (`"up"` \| `"down"`) | Administratively enables (`up`) or disables (`down`) a network interface. |
 | **`add_static_route`** | `destination` (str), `gateway` (str), `interface` (str) | Configures a new static IPv4 route on the FortiGate firewall. |
 | **`toggle_firewall_policy`** | `policy_id` (int), `status` (`"enable"` \| `"disable"`) | Enables or disables a specific firewall security policy by policy ID. |
 | **`disconnect_ssl_vpn_user`** | `username` (str) | Forcefully terminates an active SSL-VPN user session. |
+
 
 ---
 
