@@ -303,6 +303,33 @@ def get_vdom_list() -> Dict[str, Any]:
     client = get_fg_client()
     return client.get_vdom_list()
 
+def get_arp_table() -> Dict[str, Any]:
+    """
+    Get the active IPv4 ARP table mappings (IP address, MAC address, interface, and reachability state).
+    Use this to verify Layer 2 neighbor reachability, gateway MAC resolution, and IP conflicts.
+    """
+    client = get_fg_client()
+    return client.get_arp_table()
+
+def get_dhcp_leases() -> Dict[str, Any]:
+    """
+    Get active DHCP client lease assignments (assigned IP, MAC address, hostname, interface, and lease duration).
+    Use this to inspect connected endpoints, verify DHCP pool assignments, and troubleshoot client IP issues.
+    """
+    client = get_fg_client()
+    return client.get_dhcp_leases()
+
+def backup_configuration(destination_dir: str = ".backups") -> Dict[str, Any]:
+    """
+    Take a full configuration backup snapshot of the FortiGate firewall and save it locally.
+    Use this before performing configuration modifications or when creating audit restore points.
+    
+    Parameters:
+    - destination_dir: Directory path where the backup .conf file will be saved (default: '.backups').
+    """
+    client = get_fg_client()
+    return client.backup_configuration(destination_dir=destination_dir)
+
 
 # List of all tools to expose to Gemini
 FORTIGATE_TOOLS = [
@@ -318,6 +345,9 @@ FORTIGATE_TOOLS = [
     get_sdwan_status,
     get_ha_status,
     get_vdom_list,
+    get_arp_table,
+    get_dhcp_leases,
+    backup_configuration,
     reset_vpn_tunnel,
     toggle_interface,
     add_static_route,
@@ -331,7 +361,7 @@ You have access to tools that query and modify a target FortiGate firewall's RES
 
 Your role is to help the user diagnose, inspect, verify, and restore the health of their FortiGate unit.
 When responding to requests:
-1. Use your tools to fetch necessary data (e.g., get_system_status, get_system_resources, get_interfaces, get_vpn_status, get_routing_table, get_system_logs, get_bgp_neighbors, get_ospf_neighbors, get_firewall_policies, get_sdwan_status, get_ha_status, get_vdom_list).
+1. Use your tools to fetch necessary data (e.g., get_system_status, get_system_resources, get_interfaces, get_vpn_status, get_routing_table, get_system_logs, get_bgp_neighbors, get_ospf_neighbors, get_firewall_policies, get_sdwan_status, get_ha_status, get_vdom_list, get_arp_table, get_dhcp_leases, backup_configuration).
 2. Analyze the outputs carefully:
    - Check if any interfaces are unexpectedly down (especially WAN interfaces with a link status of 'down').
    - Check SD-WAN health metrics (get_sdwan_status) for packet loss, high latency/jitter, or SLA failure.
@@ -340,10 +370,11 @@ When responding to requests:
    - Inspect VPN tunnels for disconnects (status 'down' for configured tunnels) or active SSL-VPN session anomalies.
    - Verify BGP dynamic routing status (get_bgp_neighbors) to check if BGP peers are 'Established' or down ('Active', 'Idle').
    - Verify OSPF dynamic routing status (get_ospf_neighbors) to check if OSPF neighbors are fully adjacent ('Full') or down/stuck ('Init', 'Down').
+   - Check ARP entries (get_arp_table) and DHCP leases (get_dhcp_leases) to verify endpoint reachability and IP pool assignments.
    - Inspect firewall security policies (get_firewall_policies) to check if policies block necessary dynamic routing protocols (like BGP TCP port 179) or specific traffic routes.
    - Verify that there is a default route (0.0.0.0/0) in the routing table and trace how routes route traffic.
    - Read system logs (get_system_logs) to troubleshoot issues, find login failures, or explain why VPN connection attempts failed.
-3. You have access to active configuration write tools: `reset_vpn_tunnel`, `toggle_interface`, `add_static_route`, `toggle_firewall_policy`, and `disconnect_ssl_vpn_user`.
+3. You have access to active configuration write tools: `reset_vpn_tunnel`, `toggle_interface`, `add_static_route`, `toggle_firewall_policy`, `disconnect_ssl_vpn_user`, and `backup_configuration`.
    - BEFORE invoking any write action, explain to the user exactly what you propose to do.
    - If the client fails with a PermissionError, explain to the user that write/mitigation actions are disabled (they must set `ENABLE_WRITE_ACTIONS=True` in their environment or .env file) or that their FortiGate REST API token lacks write permissions. Suggest equivalent CLI commands they can execute manually.
 4. Be professional, structured, and clear. Format your reports and answers with Markdown tables, bold key metrics, and bulleted lists.

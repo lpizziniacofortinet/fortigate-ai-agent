@@ -1,6 +1,8 @@
+import os
 import logging
 import urllib3
 import requests
+from datetime import datetime
 from typing import Dict, Any, List, Optional
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
@@ -25,6 +27,8 @@ class FortiGateClient:
         vdom: str = "root",
         ca_bundle: str = "",
         enable_write_actions: bool = False,
+        dry_run: bool = False,
+        backup_before_write: bool = True,
         mock: bool = False
     ):
         self.host = host.strip()
@@ -35,6 +39,8 @@ class FortiGateClient:
         self.vdom = vdom.strip() if vdom else "root"
         self.ca_bundle = ca_bundle.strip() if ca_bundle else ""
         self.enable_write_actions = enable_write_actions
+        self.dry_run = dry_run
+        self.backup_before_write = backup_before_write
         self.mock = mock
 
         # Set up base URL
@@ -529,11 +535,92 @@ class FortiGateClient:
         logger.warning("All log endpoints failed. Returning empty log results.")
         return {"status": "warning", "results": [], "message": "Log retrieval not supported or logging is disabled on target FortiGate"}
 
+    def _execute_write_prechecks(self, action_name: str, details: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Validates write permissions, handles dry-run simulation, and triggers pre-change backup."""
+        if not self.enable_write_actions:
+            raise PermissionError(
+                "Write/Mitigation actions are currently disabled. Set ENABLE_WRITE_ACTIONS=True in .env "
+                "or use the --enable-write CLI flag, and ensure your API key has write permissions."
+            )
+
+        if self.dry_run:
+            logger.info(f"[DRY RUN] Simulating {action_name}: {details}")
+            return {
+                "status": "dry_run",
+                "action": action_name,
+                "message": f"[DRY RUN - No Changes Made] Would execute '{action_name}' on FortiGate with parameters: {details}",
+                "parameters": details
+            }
+
+        if self.backup_before_write:
+            try:
+                backup_res = self.backup_configuration()
+                logger.info(f"Pre-change configuration backup created: {backup_res.get('file_path')}")
+            except Exception as e:
+                logger.warning(f"Could not complete pre-change configuration backup: {e}")
+
+        return None
+
+    def backup_configuration(self, destination_dir: str = ".backups") -> Dict[str, Any]:
+        """
+        Retrieves a full system configuration snapshot from the FortiGate and saves it locally.
+        """
+        os.makedirs(destination_dir, exist_ok=True)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        host_tag = self.host if self.host else "mock_fortigate"
+        file_name = f"fortigate_backup_{host_tag}_{timestamp}.conf"
+        file_path = os.path.join(destination_dir, file_name)
+
+        if self.mock:
+            content = (
+                f"# FortiOS Configuration Snapshot (Simulated Backup)\n"
+                f"# Hostname: FG-HQ-Primary\n"
+                f"# Timestamp: {datetime.now().isoformat()}\n"
+                f"# VDOM: {self.vdom}\n"
+                f"# Auto-generated before configuration write operation.\n"
+                f"config system global\n"
+                f"    set hostname \"FG-HQ-Primary\"\n"
+                f"end\n"
+            )
+            with open(file_path, "w", encoding="utf-8") as f:
+                f.write(content)
+
+            return {
+                "status": "success",
+                "file_path": file_path,
+                "file_name": file_name,
+                "message": f"Configuration backup snapshot saved to '{file_path}'.",
+                "timestamp": timestamp,
+                "scope": "global"
+            }
+
+        try:
+            resp = self._get("/monitor/system/config/backup", params={"scope": "global"})
+            content = resp if isinstance(resp, str) else str(resp)
+            with open(file_path, "w", encoding="utf-8") as f:
+                f.write(content)
+
+            return {
+                "status": "success",
+                "file_path": file_path,
+                "file_name": file_name,
+                "message": f"Live configuration backup snapshot saved to '{file_path}'.",
+                "timestamp": timestamp,
+                "scope": "global"
+            }
+        except Exception as e:
+            logger.error(f"Failed to backup configuration from FortiGate: {e}")
+            raise ConnectionError(f"Configuration backup failed: {e}")
+
     def reset_vpn_tunnel(self, p1_name: str) -> Dict[str, Any]:
         """
         Sends a POST request to reset VPN Phase 1 tunnel statistics.
         This forces Phase 1 negotiations to restart.
         """
+        precheck = self._execute_write_prechecks("reset_vpn_tunnel", {"p1_name": p1_name})
+        if precheck:
+            return precheck
+
         if self.mock:
             return {
                 "status": "success",
@@ -550,6 +637,10 @@ class FortiGateClient:
         if status not in ("up", "down"):
             raise ValueError("Status parameter must be 'up' or 'down'.")
 
+        precheck = self._execute_write_prechecks("toggle_interface", {"interface_name": interface_name, "status": status})
+        if precheck:
+            return precheck
+
         if self.mock:
             return {
                 "status": "success",
@@ -562,6 +653,14 @@ class FortiGateClient:
         """
         Configures a static route on the FortiGate CMDB.
         """
+        precheck = self._execute_write_prechecks("add_static_route", {
+            "destination": destination,
+            "gateway": gateway,
+            "interface": interface
+        })
+        if precheck:
+            return precheck
+
         if self.mock:
             return {
                 "status": "success",
@@ -773,6 +872,10 @@ class FortiGateClient:
         if status not in ("enable", "disable"):
             raise ValueError("Status parameter must be 'enable' or 'disable'.")
 
+        precheck = self._execute_write_prechecks("toggle_firewall_policy", {"policy_id": policy_id, "status": status})
+        if precheck:
+            return precheck
+
         if self.mock:
             return {
                 "status": "success",
@@ -788,6 +891,10 @@ class FortiGateClient:
         username = username.strip()
         if not username:
             raise ValueError("Username parameter must not be empty.")
+
+        precheck = self._execute_write_prechecks("disconnect_ssl_vpn_user", {"username": username})
+        if precheck:
+            return precheck
 
         if self.mock:
             return {
@@ -810,4 +917,42 @@ class FortiGateClient:
             }
 
         return self._get("/cmdb/system/vdom")
+
+    def get_arp_table(self) -> Dict[str, Any]:
+        """Retrieves the active IPv4 ARP address resolution table."""
+        if self.mock:
+            return {
+                "status": "success",
+                "results": [
+                    {"ip": "198.51.100.1", "mac": "00:09:0f:aa:bb:01", "interface": "port1", "state": "reachable"},
+                    {"ip": "198.51.100.254", "mac": "00:09:0f:aa:bb:fe", "interface": "port1", "state": "reachable"},
+                    {"ip": "192.168.1.100", "mac": "f4:8e:38:12:34:56", "interface": "port3", "state": "reachable"},
+                    {"ip": "10.0.1.50", "mac": "52:54:00:12:34:56", "interface": "dmz", "state": "reachable"}
+                ]
+            }
+
+        try:
+            return self._get("/monitor/network/arp")
+        except Exception as e:
+            logger.warning(f"Failed to fetch ARP table via /monitor/network/arp: {e}. Trying fallback...")
+            return self._get("/monitor/system/arp")
+
+    def get_dhcp_leases(self) -> Dict[str, Any]:
+        """Retrieves active DHCP client lease assignments and reservations."""
+        if self.mock:
+            return {
+                "status": "success",
+                "results": [
+                    {"ip": "192.168.1.100", "mac": "f4:8e:38:12:34:56", "hostname": "Workstation-Fin-01", "interface": "port3", "lease_expire": 86400, "status": "active"},
+                    {"ip": "192.168.1.101", "mac": "f4:8e:38:98:76:54", "hostname": "Printer-HQ-Color", "interface": "port3", "lease_expire": 43200, "status": "active"},
+                    {"ip": "10.0.1.50", "mac": "52:54:00:12:34:56", "hostname": "DMZ-Web-Staging", "interface": "dmz", "lease_expire": 86400, "status": "active"}
+                ]
+            }
+
+        try:
+            return self._get("/monitor/system/dhcp")
+        except Exception as e:
+            logger.warning(f"Failed to fetch DHCP leases via /monitor/system/dhcp: {e}. Trying fallback...")
+            return self._get("/monitor/system/dhcp/status")
+
 

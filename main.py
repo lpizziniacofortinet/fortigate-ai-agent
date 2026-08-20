@@ -1,7 +1,9 @@
 import os
 import sys
+import json
 import logging
 import argparse
+from datetime import datetime
 from typing import Optional, Dict, Any, List
 from rich.console import Console
 from rich.panel import Panel
@@ -39,6 +41,116 @@ console = Console()
 
 from rich.align import Align
 from rich.text import Text
+
+def export_report_to_html(markdown_content: str, output_path: str, title: str = "FortiGate AI Operations & Health Report"):
+    """Exports diagnostic report to a standalone, responsive, styled HTML document."""
+    html_template = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{title}</title>
+    <style>
+        :root {{
+            --bg-color: #0f172a;
+            --card-bg: #1e293b;
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            --border: #334155;
+            --code-bg: #0b0f19;
+        }}
+        * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            line-height: 1.6;
+            padding: 2rem 1rem;
+        }}
+        .container {{ max-width: 960px; margin: 0 auto; }}
+        .header {{
+            background: linear-gradient(135deg, #1e1b4b 0%, #312e81 100%);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 2rem;
+            margin-bottom: 2rem;
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5);
+        }}
+        .header h1 {{ color: #c084fc; font-size: 1.8rem; margin-bottom: 0.5rem; }}
+        .header p {{ color: var(--text-muted); font-size: 0.95rem; }}
+        .card {{
+            background-color: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 2rem;
+            margin-bottom: 2rem;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3);
+        }}
+        h2, h3, h4 {{ color: #e2e8f0; margin-top: 1.5rem; margin-bottom: 0.75rem; border-bottom: 1px solid var(--border); padding-bottom: 0.3rem; }}
+        p, ul, ol {{ margin-bottom: 1rem; }}
+        ul, ol {{ padding-left: 1.5rem; }}
+        li {{ margin-bottom: 0.4rem; }}
+        table {{ width: 100%; border-collapse: collapse; margin: 1.5rem 0; font-size: 0.95rem; }}
+        th, td {{ padding: 0.75rem 1rem; text-align: left; border-bottom: 1px solid var(--border); }}
+        th {{ background-color: #0f172a; color: #a855f7; font-weight: 600; }}
+        tr:hover {{ background-color: rgba(255, 255, 255, 0.02); }}
+        code {{
+            background-color: var(--code-bg);
+            color: #38bdf8;
+            padding: 0.2rem 0.4rem;
+            border-radius: 4px;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+            font-size: 0.875em;
+        }}
+        pre {{
+            background-color: var(--code-bg);
+            border: 1px solid var(--border);
+            padding: 1rem;
+            border-radius: 8px;
+            overflow-x: auto;
+            margin: 1rem 0;
+        }}
+        pre code {{ padding: 0; background: none; color: #f1f5f9; }}
+        .footer {{ text-align: center; color: var(--text-muted); font-size: 0.85rem; margin-top: 3rem; }}
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🛡️ FortiGate AI Health & Diagnostics Report</h1>
+            <p>Generated on {datetime.now().strftime("%Y-%m-%d %H:%M:%S")} | Powered by Gemini AI Agent</p>
+        </div>
+        <div class="card" id="report-content">
+            <pre style="white-space: pre-wrap;">{markdown_content}</pre>
+        </div>
+        <div class="footer">
+            <p>FortiGate AI Operations & Diagnostics Agent | Executive Operational Report</p>
+        </div>
+    </div>
+    <script>
+        if (typeof marked !== 'undefined') {{
+            const rawContent = {json.dumps(markdown_content)};
+            document.getElementById('report-content').innerHTML = marked.parse(rawContent);
+        }}
+    </script>
+</body>
+</html>
+"""
+    with open(output_path, "w", encoding="utf-8") as f:
+        f.write(html_template)
+
+def export_report(content: str, output_path: str, is_json: bool = False):
+    """Saves report output to the specified target path in HTML, Markdown, or JSON format."""
+    try:
+        if output_path.lower().endswith(".html") and not is_json:
+            export_report_to_html(content, output_path)
+        else:
+            with open(output_path, "w", encoding="utf-8") as f:
+                f.write(content)
+        console.print(f"[green]✓ Diagnostic report successfully exported to:[/green] [bold cyan]{output_path}[/bold cyan]")
+    except Exception as e:
+        console.print(f"[red]Failed to export report to '{output_path}': {e}[/red]")
 
 def display_welcome_banner():
     """Displays a premium ASCII and text welcome banner."""
@@ -113,7 +225,10 @@ def run_diagnostics(agent: FortiGateAgent, output_json: bool = False):
         try:
             # Direct structured agent call
             report = agent.run_structured_query(prompt)
-            print(report.model_dump_json(indent=2))
+            json_output = report.model_dump_json(indent=2)
+            print(json_output)
+            if Config.OUTPUT_FILE:
+                export_report(json_output, Config.OUTPUT_FILE, is_json=True)
         except Exception as e:
             import json
             print(json.dumps({"error": f"AI Agent Diagnostics Error: {e}"}))
@@ -122,7 +237,7 @@ def run_diagnostics(agent: FortiGateAgent, output_json: bool = False):
     console.print("\n[bold blue]Starting Full FortiGate Security & Health Diagnostics...[/bold blue]")
     
     # 1. Show local raw metrics summary before LLM report
-    with console.status("[bold green]Querying FortiGate details (Status, Resources, Interfaces, VPN, Routing, Logs)...") as status:
+    with console.status("[bold green]Querying FortiGate details (Status, Resources, Interfaces, VPN, Routing, Logs, ARP, DHCP)...") as status:
         try:
             sys_status = agent.fg_client.get_system_status()
             sys_res = agent.fg_client.get_system_resources()
@@ -132,6 +247,8 @@ def run_diagnostics(agent: FortiGateAgent, output_json: bool = False):
             logs = agent.fg_client.get_system_logs()
             sdwan = agent.fg_client.get_sdwan_status()
             ha = agent.fg_client.get_ha_status()
+            arp = agent.fg_client.get_arp_table()
+            dhcp = agent.fg_client.get_dhcp_leases()
         except Exception as e:
             console.print(f"[red]Failed to fetch data from FortiGate: {e}[/red]")
             return
@@ -249,6 +366,13 @@ def run_diagnostics(agent: FortiGateAgent, output_json: bool = False):
         route_list = []
     table.add_row("Routing Table", f"Total routes active: [bold]{len(route_list)}[/bold]")
 
+    # ARP & DHCP
+    arp_res = arp.get("results", []) if isinstance(arp, dict) else []
+    arp_count = len(arp_res) if isinstance(arp_res, list) else 0
+    dhcp_res = dhcp.get("results", []) if isinstance(dhcp, dict) else []
+    dhcp_count = len(dhcp_res) if isinstance(dhcp_res, list) else 0
+    table.add_row("Network Neighbors & DHCP", f"ARP Entries: [bold]{arp_count}[/bold], Active DHCP Leases: [bold]{dhcp_count}[/bold]")
+
     # Logs
     log_raw = logs.get("results", []) if isinstance(logs, dict) else []
     if isinstance(log_raw, dict):
@@ -264,7 +388,6 @@ def run_diagnostics(agent: FortiGateAgent, output_json: bool = False):
     # 2. Query Agent for AI Report
     console.print("\n[bold purple]Generating AI Diagnostic Report and Health Assessment...[/bold purple]")
     
-    
     with console.status("[bold purple]Gemini AI Agent is analyzing operational metrics...") as status:
         try:
             ai_report = agent.run_query(prompt)
@@ -273,6 +396,9 @@ def run_diagnostics(agent: FortiGateAgent, output_json: bool = False):
             return
             
     console.print(Panel(Markdown(ai_report), title="FortiGate Health & Diagnostics Report", border_style="purple"))
+
+    if Config.OUTPUT_FILE:
+        export_report(ai_report, Config.OUTPUT_FILE)
 
 def run_interactive_mode(agent: FortiGateAgent):
     """Launches an interactive chat loop with the FortiGate agent."""
@@ -352,7 +478,7 @@ def parse_args():
     parser.add_argument(
         "command",
         nargs="?",
-        choices=["diagnose", "interactive", "agentic", "config"],
+        choices=["diagnose", "interactive", "agentic", "config", "backup"],
         help="Command to run directly. If omitted, displays the interactive selection menu."
     )
     parser.add_argument(
@@ -369,6 +495,15 @@ def parse_args():
         "--enable-write", "-w",
         action="store_true",
         help="Enable active write/mitigation actions (default: False for security)."
+    )
+    parser.add_argument(
+        "--dry-run", "-d",
+        action="store_true",
+        help="Simulate write actions without modifying firewall (safety dry run)."
+    )
+    parser.add_argument(
+        "--output", "-o",
+        help="Export diagnostic report to a file (.md, .html, or .json)."
     )
     parser.add_argument(
         "--ip", "-i",
@@ -425,6 +560,10 @@ def main():
         Config.VERIFY_SSL = True
     if args.enable_write:
         Config.ENABLE_WRITE_ACTIONS = True
+    if args.dry_run:
+        Config.DRY_RUN = True
+    if args.output:
+        Config.OUTPUT_FILE = args.output
 
     # Re-evaluate mock mode if settings changed
     if not Config.MOCK_MODE and not (Config.FORTIGATE_IP and Config.FORTIGATE_TOKEN):
@@ -460,6 +599,8 @@ def main():
         vdom=Config.FORTIGATE_VDOM,
         ca_bundle=Config.CA_BUNDLE,
         enable_write_actions=Config.ENABLE_WRITE_ACTIONS,
+        dry_run=Config.DRY_RUN,
+        backup_before_write=Config.BACKUP_BEFORE_WRITE,
         mock=Config.MOCK_MODE
     )
 
@@ -494,6 +635,20 @@ def main():
         elif cmd == "config":
             # Configuration was already printed
             return
+        elif cmd == "backup":
+            with console.status("[bold green]Creating configuration snapshot backup..."):
+                try:
+                    res = client.backup_configuration()
+                    console.print(Panel(
+                        f"[green]✓ Configuration backup successfully created![/green]\n"
+                        f"File path: [bold cyan]{res.get('file_path')}[/bold cyan]\n"
+                        f"Timestamp: [white]{res.get('timestamp')}[/white]",
+                        title="Configuration Backup",
+                        border_style="green"
+                    ))
+                except Exception as e:
+                    console.print(f"[red]Failed to create backup: {e}[/red]")
+            return
 
     # Interactive Menu Loop
     while True:
@@ -501,10 +656,11 @@ def main():
         console.print(" 1. Run Automated Diagnostics & Health Report")
         console.print(" 2. Enter Interactive Chat Console")
         console.print(" 3. Run Autonomous Agentic Reasoning Call")
-        console.print(" 4. View Current Configuration Settings")
-        console.print(" 5. Exit")
+        console.print(" 4. Create Configuration Snapshot Backup")
+        console.print(" 5. View Current Configuration Settings")
+        console.print(" 6. Exit")
         
-        choice = Prompt.ask("Enter selection (1-5)", choices=["1", "2", "3", "4", "5"], default="1")
+        choice = Prompt.ask("Enter selection (1-6)", choices=["1", "2", "3", "4", "5", "6"], default="1")
         
         if choice == "1":
             run_diagnostics(agent, output_json=False)
@@ -513,8 +669,21 @@ def main():
         elif choice == "3":
             run_agentic_mode(agent)
         elif choice == "4":
-            Config.print_status()
+            with console.status("[bold green]Creating configuration snapshot backup..."):
+                try:
+                    res = client.backup_configuration()
+                    console.print(Panel(
+                        f"[green]✓ Configuration backup successfully created![/green]\n"
+                        f"File path: [bold cyan]{res.get('file_path')}[/bold cyan]\n"
+                        f"Timestamp: [white]{res.get('timestamp')}[/white]",
+                        title="Configuration Backup",
+                        border_style="green"
+                    ))
+                except Exception as e:
+                    console.print(f"[red]Failed to create backup: {e}[/red]")
         elif choice == "5":
+            Config.print_status()
+        elif choice == "6":
             console.print("[green]Goodbye![/green]")
             break
 

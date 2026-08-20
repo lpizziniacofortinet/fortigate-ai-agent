@@ -32,6 +32,9 @@ The agent communicates with the standard FortiOS REST API (`/api/v2`) and implem
 - **Firewall Policies**: `GET /api/v2/cmdb/firewall/policy` (inspects configured security rules)
 - **Firewall Policy Toggle**: `PUT /api/v2/cmdb/firewall/policy/{policy_id}` (enable or disable specific policies)
 - **Virtual Domains (VDOMs)**: `GET /api/v2/cmdb/system/vdom` (configured VDOM partitions)
+- **ARP Table**: `GET /api/v2/monitor/network/arp` (falls back to `GET /api/v2/monitor/system/arp` for Layer 2 MAC mappings)
+- **DHCP Leases**: `GET /api/v2/monitor/system/dhcp` (falls back to `GET /api/v2/monitor/system/dhcp/status` for active IP allocations)
+- **Configuration Backup**: `GET /api/v2/monitor/system/config/backup` (full system configuration snapshot)
 - **Event Logs**: `GET /api/v2/monitor/log/memory/messages` (falls back to `GET /api/v2/monitor/log/disk/messages` and `GET /api/v2/monitor/log/current`)
 
 For authentication, the client utilizes the secure **`Authorization: Bearer <API-TOKEN>`** HTTP header conforming to modern FortiOS standards (v7.2.x, v7.4.x, v7.6.x+).
@@ -40,9 +43,9 @@ For authentication, the client utilizes the secure **`Authorization: Bearer <API
 
 ## AI Agent Tools Reference (Function Calling)
 
-The AI Agent exposes 17 Python function-calling tools (`FORTIGATE_TOOLS`) registered directly with the Gemini model via the modern `google-genai` SDK. In interactive or agentic modes, the model autonomously analyzes user queries, selects appropriate tools, executes them, and synthesizes operational findings.
+The AI Agent exposes 20 Python function-calling tools (`FORTIGATE_TOOLS`) registered directly with the Gemini model via the modern `google-genai` SDK. In interactive or agentic modes, the model autonomously analyzes user queries, selects appropriate tools, executes them, and synthesizes operational findings.
 
-### 1. Read-Only Telemetry & Inspection Tools (12 Tools)
+### 1. Read-Only Telemetry & Inspection Tools (14 Tools)
 
 | Tool Name | Parameters | Description / Telemetry Gathered |
 | :--- | :--- | :--- |
@@ -51,6 +54,8 @@ The AI Agent exposes 17 Python function-calling tools (`FORTIGATE_TOOLS`) regist
 | **`get_interfaces`** | _None_ | Inspects network interfaces: administrative and physical link status (up/down), IP assignments, speed, duplex, and Rx/Tx byte/packet counters. |
 | **`get_vpn_status`** | _None_ | Gathers IPsec Phase 1/Phase 2 tunnel states, remote gateways, throughput, and active SSL-VPN user sessions (username, source IP, duration, bytes). |
 | **`get_routing_table`** | _None_ | Retrieves active IPv4 routing table entries, next-hop gateways, egress interface names, administrative distances, and route types (static, connected, dynamic). |
+| **`get_arp_table`** | _None_ | Retrieves IPv4 ARP table mappings (IP, MAC, interface, state) to verify Layer 2 neighbor resolution and reachability. |
+| **`get_dhcp_leases`** | _None_ | Retrieves active DHCP client lease assignments (IP, MAC, hostname, interface, expiration) to troubleshoot client addressing. |
 | **`get_system_logs`** | `log_type` (str, default: `"event"`), `limit` (int, default: `15`) | Fetches recent event, traffic, or security log entries with timestamps, severity levels (warning, info, notice), subtypes, and messages. |
 | **`get_bgp_neighbors`** | _None_ | Checks BGP dynamic routing peer states (`Established`, `Active`, `Idle`), remote AS numbers, uptime, and advertised/received route counts. |
 | **`get_ospf_neighbors`** | _None_ | Checks OSPF dynamic routing neighbor states (`Full`, `Init`, `Attempt`, `Down`), neighbor router IDs, priorities, and interfaces. |
@@ -59,13 +64,14 @@ The AI Agent exposes 17 Python function-calling tools (`FORTIGATE_TOOLS`) regist
 | **`get_ha_status`** | _None_ | Monitors High Availability (HA) cluster status, peer members, sync state (`in-sync`/out-of-sync), and checksum matches. |
 | **`get_vdom_list`** | _None_ | Lists configured Virtual Domains (VDOMs) and cluster partition IDs for multi-tenant deployments. |
 
-### 2. Active Remediation & Write Tools (5 Tools)
+### 2. Active Remediation & Write Tools (6 Tools)
 
 > [!NOTE]
-> All write tools require `ENABLE_WRITE_ACTIONS=True` (or `--enable-write` CLI flag) and an API token with read-write permissions. In interactive terminal sessions, the agent will always request explicit confirmation (`y/N`) before modifying any configuration.
+> All write tools require `ENABLE_WRITE_ACTIONS=True` (or `--enable-write` CLI flag) and an API token with read-write permissions. In interactive terminal sessions, the agent will always request explicit confirmation (`y/N`) before modifying any configuration. When `DRY_RUN=True` or `--dry-run` is specified, write actions are safely simulated.
 
 | Tool Name | Parameters | Target Remediation Action |
 | :--- | :--- | :--- |
+| **`backup_configuration`** | `destination_dir` (str, default: `".backups"`) | Downloads and saves a complete timestamped configuration snapshot (.conf) locally. |
 | **`reset_vpn_tunnel`** | `p1_name` (str) | Flushes and resets an IPsec Phase 1 VPN tunnel to restart IKE/IPsec negotiations. |
 | **`toggle_interface`** | `interface_name` (str), `status` (`"up"` \| `"down"`) | Administratively enables (`up`) or disables (`down`) a network interface. |
 | **`add_static_route`** | `destination` (str), `gateway` (str), `interface` (str) | Configures a new static IPv4 route on the FortiGate firewall. |
@@ -118,6 +124,12 @@ MOCK_MODE=False
 
 # Enable active write/mitigation actions (disable for safe read-only mode)
 ENABLE_WRITE_ACTIONS=False
+
+# Dry run mode: simulate write actions without executing REST calls
+DRY_RUN=False
+
+# Automatically take configuration snapshot backup before executing write actions
+BACKUP_BEFORE_WRITE=True
 ```
 
 ### 4. Environment Variables Reference
@@ -135,6 +147,9 @@ ENABLE_WRITE_ACTIONS=False
 | `CA_BUNDLE` | String | `""` | File path to a custom CA certificate bundle (.pem). Enables SSL verification. |
 | `MOCK_MODE` | Boolean | `Auto` | If `True` or if IP/Token are omitted, runs offline mock simulation. |
 | `ENABLE_WRITE_ACTIONS` | Boolean | `False` | If `True`, enables active configuration modifications (VPN reset, interface toggle, static routes, policy changes). |
+| `DRY_RUN` | Boolean | `False` | If `True`, simulates write actions and displays proposed parameters without applying changes. |
+| `BACKUP_BEFORE_WRITE` | Boolean | `True` | If `True`, automatically takes a `.conf` backup snapshot before applying write actions. |
+| `OUTPUT_FILE` | String | `""` | File path to export diagnostic reports (`.html`, `.md`, or `.json`). |
 
 ---
 
@@ -160,45 +175,51 @@ Launch the application without arguments to view the interactive Rich TUI menu:
 ```bash
 python3 main.py
 ```
-This presents 5 options:
+This presents 6 options:
 1. **Run Automated Diagnostics & Health Report**: Executes a full health assessment.
 2. **Enter Interactive Chat Console**: Launches a stateful conversational session with live tool calling.
 3. **Run Autonomous Agentic Reasoning Call**: Executes multi-turn reasoning with live tool execution tracing.
-4. **View Current Configuration Settings**: Displays active settings in a formatted table.
-5. **Exit**: Exits the program.
+4. **Create Configuration Snapshot Backup**: Manually triggers an immediate full configuration backup snapshot.
+5. **View Current Configuration Settings**: Displays active settings in a formatted table.
+6. **Exit**: Exits the program.
 
 ### CLI Direct Commands & Overrides
 You can bypass the menu and directly run specific commands or override settings using command-line arguments:
 
 ```bash
 # General Syntax
-python3 main.py [diagnose | interactive | agentic | config] [options]
+python3 main.py [diagnose | interactive | agentic | config | backup] [options]
 
 # Examples:
-# 1. Run automated diagnostics against a live firewall with custom port and VDOM
+# 1. Run automated diagnostics and export an executive HTML dashboard report
+python3 main.py diagnose --output report.html
+
+# 2. Run diagnostics against a live firewall with custom port and VDOM
 python3 main.py diagnose --ip 10.0.0.1 --port 8443 --vdom CustomVDOM --verify-ssl
 
-# 2. Launch interactive console in offline Mock Mode
+# 3. Launch interactive console in offline Mock Mode
 python3 main.py interactive --mock
 
-# 3. Run autonomous multi-step agentic call with execution tracing
+# 4. Run interactive console with Safety Dry Run mode enabled
+python3 main.py interactive --enable-write --dry-run
+
+# 5. Create an immediate configuration backup snapshot
+python3 main.py backup
+
+# 6. Run autonomous multi-step agentic call with execution tracing
 python3 main.py agentic
-
-# 4. Inspect current configuration
-python3 main.py config
-
-# 5. Enable active remediation write actions
-python3 main.py interactive --enable-write
 ```
 
 ### Available CLI Options
 
 | Flag | Short | Description |
 | :--- | :--- | :--- |
-| `command` | _Positional_ | Command to execute: `diagnose`, `interactive`, `agentic`, `config`. (Default: Interactive Menu). |
+| `command` | _Positional_ | Command to execute: `diagnose`, `interactive`, `agentic`, `config`, `backup`. (Default: Interactive Menu). |
 | `--json` | `-j` | Output parsed diagnostics result in raw structured JSON (suppresses banner and TUI prints). |
 | `--mock` | `-m` | Force offline Mock Mode (simulated responses). |
 | `--enable-write` | `-w` | Enable active write/mitigation actions (disabled by default for safety). |
+| `--dry-run` | `-d` | Simulate write actions safely without modifying firewall configuration. |
+| `--output` | `-o` | Export diagnostic report to a standalone HTML (`.html`), Markdown (`.md`), or JSON (`.json`) file. |
 | `--ip` | `-i` | Override the target FortiGate IP address. |
 | `--token` | `-t` | Override the FortiGate REST API Access Token. |
 | `--port` | `-p` | Override the target connection port (default: `443`). |

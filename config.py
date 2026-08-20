@@ -21,6 +21,9 @@ class Config:
     FORTIGATE_VDOM = os.getenv("FORTIGATE_VDOM", "root")
     CA_BUNDLE = os.getenv("CA_BUNDLE", "")
     ENABLE_WRITE_ACTIONS = os.getenv("ENABLE_WRITE_ACTIONS", "False").lower() in ("true", "1", "yes")
+    DRY_RUN = os.getenv("DRY_RUN", "False").lower() in ("true", "1", "yes")
+    BACKUP_BEFORE_WRITE = os.getenv("BACKUP_BEFORE_WRITE", "True").lower() in ("true", "1", "yes")
+    OUTPUT_FILE = os.getenv("OUTPUT_FILE", "")
     
     # Run settings
     # Default to Mock Mode if IP or Token are not provided
@@ -28,7 +31,7 @@ class Config:
 
     @classmethod
     def print_status(cls):
-        """Prints the current configuration configuration safely."""
+        """Prints the current configuration safely."""
         from rich.console import Console
         from rich.table import Table
         
@@ -46,6 +49,10 @@ class Config:
         table.add_row("Verify SSL Cert", str(cls.VERIFY_SSL))
         table.add_row("CA Bundle Path", cls.CA_BUNDLE if cls.CA_BUNDLE else "None (default verification)")
         table.add_row("Write Actions (Read-Write)", "ENABLED (Agent can modify configs)" if cls.ENABLE_WRITE_ACTIONS else "DISABLED (Read-Only Safe Mode)")
+        table.add_row("Dry Run Mode", "ENABLED (Simulate write actions without modifying firewall)" if cls.DRY_RUN else "DISABLED (Direct execution)")
+        table.add_row("Pre-Change Auto-Backup", "ENABLED (Save config snapshot before write)" if cls.BACKUP_BEFORE_WRITE else "DISABLED")
         table.add_row("Running Mode", "MOCK MODE (Simulating FortiGate)" if cls.MOCK_MODE else "LIVE MODE (Connecting to FortiGate)")
+        if cls.OUTPUT_FILE:
+            table.add_row("Report Export Target", cls.OUTPUT_FILE)
         
         console.print(table)

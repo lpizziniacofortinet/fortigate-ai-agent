@@ -110,6 +110,48 @@ class TestFortiGateClient(unittest.TestCase):
         disc_res = mock_client.disconnect_ssl_vpn_user("jdoe")
         self.assertEqual(disc_res["status"], "success")
 
+        arp_res = mock_client.get_arp_table()
+        self.assertEqual(arp_res["status"], "success")
+        self.assertGreaterEqual(len(arp_res["results"]), 1)
+
+        dhcp_res = mock_client.get_dhcp_leases()
+        self.assertEqual(dhcp_res["status"], "success")
+        self.assertGreaterEqual(len(dhcp_res["results"]), 1)
+
+    def test_dry_run_mode(self):
+        """Asserts that dry run mode intercepts write actions safely without execution."""
+        dry_run_client = FortiGateClient(
+            host="10.0.0.1",
+            token="token123",
+            enable_write_actions=True,
+            dry_run=True,
+            mock=True
+        )
+
+        res = dry_run_client.toggle_interface("port1", "down")
+        self.assertEqual(res["status"], "dry_run")
+        self.assertIn("DRY RUN", res["message"])
+
+        route_res = dry_run_client.add_static_route("10.10.0.0/16", "192.168.1.254", "port1")
+        self.assertEqual(route_res["status"], "dry_run")
+
+    def test_backup_configuration(self):
+        """Asserts that backup_configuration creates a valid backup snapshot file."""
+        mock_client = FortiGateClient(
+            host="10.0.0.1",
+            token="token123",
+            enable_write_actions=True,
+            mock=True
+        )
+        backup_res = mock_client.backup_configuration(destination_dir=".test_backups")
+        self.assertEqual(backup_res["status"], "success")
+        self.assertTrue(os.path.exists(backup_res["file_path"]))
+        # Clean up test file
+        if os.path.exists(backup_res["file_path"]):
+            os.remove(backup_res["file_path"])
+        if os.path.exists(".test_backups"):
+            os.rmdir(".test_backups")
+
 
 class TestAgentRoutingReasoning(unittest.TestCase):
     """Integration test checking AI Agent reasoning capabilities under a dynamic routing failure."""

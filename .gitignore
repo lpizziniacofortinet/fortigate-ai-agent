@@ -20,3 +20,9 @@ fortigate_agent.log
 .DS_Store
 .vscode/
 .idea/
+
+# Backups & Reports
+.backups/
+*.conf
+*.html
+

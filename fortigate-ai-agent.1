@@ -13,10 +13,16 @@ The tool supports an interactive chat console, a structured silent JSON diagnost
 .SH COMMANDS
 .TP
 .B diagnose
-Run a comprehensive, real-time diagnostic suite. Fetches system status, resource usage, interfaces status, VPN connections, routing table, and event logs. Feeds all data to the Gemini agent to compile a security and health report. This is the default command if none is specified.
+Run a comprehensive, real-time diagnostic suite. Fetches system status, resource usage, interfaces status, VPN connections, routing table, ARP mappings, DHCP leases, and event logs. Feeds all data to the Gemini agent to compile a security and health report. This is the default command if none is specified.
 .TP
 .B interactive
 Enter an interactive console chat. Launches a stateful session where you can query the AI agent in real-time. The agent dynamically decides which REST API tools to execute to answer your queries.
+.TP
+.B agentic
+Run an autonomous multi-step investigation loop with live tool execution tracing.
+.TP
+.B backup
+Take a full configuration backup snapshot of the FortiGate firewall and save it locally in the .backups directory.
 .TP
 .B config
 Inspect the current connection details, target VDOM, SSL settings, execution mode (Mock or Live), and Gemini model selection.
@@ -31,6 +37,12 @@ Force offline Mock Mode. Simulates high-fidelity FortiGate telemetry (e.g. CPU s
 .TP
 .B \-w, \-\-enable\-write
 Enable active write/mitigation actions (disabled by default for safety). Requires a REST API Admin key with write capabilities.
+.TP
+.B \-d, \-\-dry\-run
+Simulate write actions safely without modifying firewall configuration. Displays proposed parameters in a warning panel.
+.TP
+.B \-o, \-\-output \fIFILE\fR
+Export diagnostic report to a standalone HTML (.html), Markdown (.md), or JSON (.json) file.
 .TP
 .B \-i, \-\-ip \fIADDRESS\fR
 Override target FortiGate IP address or hostname.
@@ -82,6 +94,15 @@ Boolean (True/False) to force offline mock simulation.
 .TP
 .B ENABLE_WRITE_ACTIONS
 Boolean (True/False) to enable active configuration write/mitigation actions (default is False).
+.TP
+.B DRY_RUN
+Boolean (True/False) to simulate configuration write actions safely without sending REST requests to the firewall (default is False).
+.TP
+.B BACKUP_BEFORE_WRITE
+Boolean (True/False) to automatically create a configuration snapshot backup before applying write operations (default is True).
+.TP
+.B OUTPUT_FILE
+Path to export report output file (.html, .md, or .json).
 
 .SH FILES
 .TP
