@@ -61,12 +61,18 @@ Enable HTTPS SSL certificate verification.
 .TP
 .B \-c, \-\-ca\-bundle \fIFILE\fR
 Path to custom CA certificate bundle file (implicitly enables SSL verification).
+.TP
+.B \-\-model \fIMODEL\fR
+Override target Gemini model (e.g. gemini-2.5-flash, gemini-2.5-pro, gemini-3.5-flash, gemini-pro-latest).
 
 .SH ENVIRONMENT
 The agent loads default settings from a local \fB.env\fR file or the system environment:
 .TP
 .B GEMINI_API_KEY
 Required. Google Gemini Developer API key.
+.TP
+.B GEMINI_MODEL
+Target Gemini model name (default is "gemini-2.5-flash").
 .TP
 .B FORTIGATE_IP
 IP address or hostname of the FortiGate firewall.

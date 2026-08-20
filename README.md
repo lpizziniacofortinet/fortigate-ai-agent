@@ -1,12 +1,13 @@
 # FortiGate AI Operations & Diagnostics Agent
 
-A production-ready AI operations and troubleshooting agent written in Python that interfaces directly with FortiGate firewalls running FortiOS (v7.0+) using the modern **`google-genai`** SDK. The agent is equipped with 17 custom function-calling tools that enable it to dynamically retrieve, inspect, correlate, and remediate network configurations, resource utilization, interfaces, SD-WAN health metrics, VPN tunnels, dynamic routing adjacencies (BGP & OSPF), firewall security policies, and system event logs.
+A production-ready AI operations and troubleshooting agent written in Python that interfaces directly with FortiGate firewalls running FortiOS (v7.0+) using the modern **`google-genai`** SDK. The agent is equipped with 20 custom function-calling tools that enable it to dynamically retrieve, inspect, correlate, and remediate network configurations, resource utilization, interfaces, SD-WAN health metrics, VPN tunnels, dynamic routing adjacencies (BGP & OSPF), ARP tables, DHCP leases, firewall security policies, system configuration backups, and event logs.
 
-It provides four operational modes:
+It provides five operational modes:
 1. **Automated Diagnostics**: Gathers operational metrics across all subsystems, passes them to the AI agent, and generates a structured markdown-based health assessment and troubleshooting plan.
 2. **Interactive Console**: A stateful chat session where you can ask arbitrary questions about the FortiGate, and the AI agent autonomously decides which API tools to invoke in the background.
 3. **Autonomous Agentic Call**: Multi-step chain-of-thought call loop where the AI agent autonomously executes tool calls, inspects findings, triggers follow-up telemetry (e.g. log queries or firewall policy inspections), and prints a live reasoning trace of all tools called.
-4. **Configuration Inspector**: Displays active environment variables, target VDOM, SSL verification modes, and Gemini model settings.
+4. **Configuration Backup**: Generates an immediate full system configuration snapshot (`.conf`) for disaster recovery and change auditing.
+5. **Configuration Inspector**: Displays active environment variables, target VDOM, SSL verification modes, and Gemini model settings.
 
 It also features a high-fidelity **Mock Mode** for offline testing and demonstration purposes without requiring a physical or virtual FortiGate appliance.
 
@@ -409,8 +410,31 @@ This log captures:
 
 ---
 
+## References & Documentation
+
+### Fortinet & FortiOS Resources
+- [Fortinet Document Library](https://docs.fortinet.com/) — Official FortiOS administration, configuration, and architecture guides.
+- [FortiOS REST API Reference (v7.0 - v7.6+)](https://docs.fortinet.com/document/fortigate/7.4.0/rest-api-reference) — FortiOS REST API CMDB and Monitor endpoint specifications.
+- [Fortinet Developer Network (FNDN)](https://fndn.fortinet.net/) — Developer resources, schemas, and API documentation for Fortinet solutions.
+- [Fortinet FortiGate Best Practices](https://docs.fortinet.com/document/fortigate/7.4.0/best-practices) — Hardening, high availability, and security guidelines.
+
+### Google Gemini & SDK Documentation
+- [Google GenAI Python SDK (`google-genai`)](https://github.com/googleapis/python-genai) — Next-generation Python SDK for Gemini models.
+- [Google AI Studio](https://aistudio.google.com/) — Developer console for API key provisioning and prompt engineering.
+- [Gemini Function Calling Guide](https://ai.google.dev/gemini-api/docs/function-calling) — Architecture specifications for structured tool calling and schema validation.
+
+### Networking & Security RFC Standards
+- [RFC 4271](https://datatracker.ietf.org/doc/html/rfc4271) — A Border Gateway Protocol 4 (BGP-4).
+- [RFC 2328](https://datatracker.ietf.org/doc/html/rfc2328) — OSPF Version 2.
+- [RFC 4301](https://datatracker.ietf.org/doc/html/rfc4301) — Security Architecture for the Internet Protocol (IPsec).
+- [RFC 826](https://datatracker.ietf.org/doc/html/rfc826) — Ethernet Address Resolution Protocol (ARP).
+- [RFC 2131](https://datatracker.ietf.org/doc/html/rfc2131) — Dynamic Host Configuration Protocol (DHCP).
+
+---
+
 ## License
 
 This project is licensed under the MIT License. See the LICENSE file for details.
+
 
 
