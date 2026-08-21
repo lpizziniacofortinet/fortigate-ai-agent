@@ -884,6 +884,69 @@ class FortiGateClient:
 
         return self._put(f"/cmdb/firewall/policy/{policy_id}", json_data={"status": status})
 
+    def apply_policy_hardening(self, policy_id: int, utm_profiles: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
+        """
+        Applies UTM security profiles (AV, IPS, WebFilter, SSL-SSH inspection) and full logging
+        to a specific firewall policy via the REST CMDB API.
+        """
+        precheck = self._execute_write_prechecks("apply_policy_hardening", {"policy_id": policy_id})
+        if precheck:
+            return precheck
+
+        if self.mock:
+            return {
+                "status": "success",
+                "message": f"[Mock Mode] Successfully applied UTM hardening to firewall policy ID {policy_id}."
+            }
+
+        # Discover available profile names on the unit dynamically
+        profiles = utm_profiles or {}
+        av_profile = profiles.get("av_profile")
+        ips_sensor = profiles.get("ips_sensor")
+        webfilter_profile = profiles.get("webfilter_profile")
+        ssl_ssh_profile = profiles.get("ssl_ssh_profile")
+
+        if not av_profile or not ips_sensor or not webfilter_profile or not ssl_ssh_profile:
+            try:
+                av_list = [p.get("name") for p in self._get("/cmdb/antivirus/profile").get("results", [])]
+                av_profile = av_profile or ("default" if "default" in av_list else (av_list[0] if av_list else ""))
+            except Exception:
+                av_profile = av_profile or "default"
+
+            try:
+                ips_list = [p.get("name") for p in self._get("/cmdb/ips/sensor").get("results", [])]
+                ips_sensor = ips_sensor or ("all_default" if "all_default" in ips_list else ("default" if "default" in ips_list else (ips_list[0] if ips_list else "")))
+            except Exception:
+                ips_sensor = ips_sensor or "all_default"
+
+            try:
+                wf_list = [p.get("name") for p in self._get("/cmdb/webfilter/profile").get("results", [])]
+                webfilter_profile = webfilter_profile or ("default" if "default" in wf_list else (wf_list[0] if wf_list else ""))
+            except Exception:
+                webfilter_profile = webfilter_profile or "default"
+
+            try:
+                ssl_list = [p.get("name") for p in self._get("/cmdb/firewall/ssl-ssh-profile").get("results", [])]
+                ssl_ssh_profile = ssl_ssh_profile or ("certificate-inspection" if "certificate-inspection" in ssl_list else (ssl_list[0] if ssl_list else ""))
+            except Exception:
+                ssl_ssh_profile = ssl_ssh_profile or "certificate-inspection"
+
+        payload = {
+            "utm-status": "enable",
+            "logtraffic": "all"
+        }
+        if av_profile:
+            payload["av-profile"] = av_profile
+        if ips_sensor:
+            payload["ips-sensor"] = ips_sensor
+        if webfilter_profile:
+            payload["webfilter-profile"] = webfilter_profile
+        if ssl_ssh_profile:
+            payload["ssl-ssh-profile"] = ssl_ssh_profile
+
+        logger.info(f"Applying hardening to firewall policy {policy_id}: {payload}")
+        return self._put(f"/cmdb/firewall/policy/{policy_id}", json_data=payload)
+
     def disconnect_ssl_vpn_user(self, username: str) -> Dict[str, Any]:
         """
         Disconnects an active SSL-VPN user session.

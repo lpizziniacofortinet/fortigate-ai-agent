@@ -268,6 +268,33 @@ def toggle_firewall_policy(policy_id: int, status: str) -> Dict[str, Any]:
 
     return client.toggle_firewall_policy(policy_id=policy_id, status=status)
 
+def apply_policy_hardening(policy_id: int) -> Dict[str, Any]:
+    """
+    Applies UTM threat protection profiles (AntiVirus, IPS, WebFilter, SSL Inspection) and full logging
+    to a permissive or uninspected firewall policy via the FortiGate REST API.
+    
+    Parameters:
+    - policy_id: The numerical ID of the firewall security policy to harden (e.g. 2, 3, 4, 5).
+    """
+    import sys
+    client = get_fg_client()
+    
+    if not client.enable_write_actions:
+        raise PermissionError(
+            "Write/Mitigation actions are currently disabled. Set ENABLE_WRITE_ACTIONS=True in .env "
+            "or use the --enable-write CLI flag, and ensure your API key has write permissions."
+        )
+
+    if sys.stdin.isatty():
+        from rich.console import Console
+        from rich.prompt import Confirm
+        console = Console()
+        console.print(f"\n[bold yellow]⚠️  WARNING: AI Agent requested to APPLY UTM HARDENING to firewall policy ID [bold cyan]{policy_id}[/bold cyan][/bold yellow]")
+        if not Confirm.ask("Do you authorize this hardening update on the live firewall?"):
+            raise PermissionError("User rejected the policy hardening operation.")
+
+    return client.apply_policy_hardening(policy_id=policy_id)
+
 def disconnect_ssl_vpn_user(username: str) -> Dict[str, Any]:
     """
     Forcefully disconnect an active SSL-VPN user session.
@@ -389,6 +416,26 @@ def quarantine_ip_address(ip_address: str, duration_seconds: int = 3600, reason:
 
     return client.quarantine_ip_address(ip_address=ip_address, duration_seconds=duration_seconds, reason=reason)
 
+def run_security_audit() -> Dict[str, Any]:
+    """
+    Run a comprehensive FortiOS Security Posture & CIS Hardening Benchmark Audit.
+    Evaluates 6 critical security domains:
+    1. Permissive Any/Any firewall policies and missing UTM profiles (AV, IPS, Web Filter, SSL inspection).
+    2. Policy shadowing, rule order conflicts, and stale/disabled policy accumulation.
+    3. Management plane interface security (cleartext HTTP/Telnet/SNMP exposure).
+    4. FortiGuard AI subscription license currency and engine signature status.
+    5. High Availability (HA) cluster synchronization and split-brain risks.
+    6. Dynamic routing peer health (BGP/OSPF), SD-WAN member SLA compliance, and IPsec tunnel states.
+    
+    Returns a quantitative Security Score (0-100), letter grade (A+ to F), passed/failed checks count,
+    shadowing conflict details, and an automated FortiOS CLI hardening playbook.
+    """
+    from security_audit import FortiGateSecurityAuditor
+    client = get_fg_client()
+    auditor = FortiGateSecurityAuditor(client)
+    report = auditor.run_audit()
+    return report.to_dict()
+
 
 # List of all tools to expose to Gemini
 FORTIGATE_TOOLS = [
@@ -409,11 +456,13 @@ FORTIGATE_TOOLS = [
     get_fortiguard_status,
     get_quarantined_ips,
     get_top_sessions,
+    run_security_audit,
     backup_configuration,
     reset_vpn_tunnel,
     toggle_interface,
     add_static_route,
     toggle_firewall_policy,
+    apply_policy_hardening,
     disconnect_ssl_vpn_user,
     quarantine_ip_address
 ]
@@ -422,10 +471,12 @@ SYSTEM_INSTRUCTION = """
 You are a highly skilled Network Security AI Agent specialized in FortiGate Firewalls (FortiOS).
 You have access to tools that query and modify a target FortiGate firewall's REST API in real time.
 
-Your role is to help the user diagnose, inspect, verify, and restore the health of their FortiGate unit.
+Your role is to help the user diagnose, inspect, verify, audit security posture, and restore the health of their FortiGate unit.
 When responding to requests:
-1. Use your tools to fetch necessary data (e.g., get_system_status, get_system_resources, get_interfaces, get_vpn_status, get_routing_table, get_system_logs, get_bgp_neighbors, get_ospf_neighbors, get_firewall_policies, get_sdwan_status, get_ha_status, get_vdom_list, get_arp_table, get_dhcp_leases, get_fortiguard_status, get_quarantined_ips, get_top_sessions, backup_configuration).
+1. Use your tools to fetch necessary data (e.g., run_security_audit, get_system_status, get_system_resources, get_interfaces, get_vpn_status, get_routing_table, get_system_logs, get_bgp_neighbors, get_ospf_neighbors, get_firewall_policies, get_sdwan_status, get_ha_status, get_vdom_list, get_arp_table, get_dhcp_leases, get_fortiguard_status, get_quarantined_ips, get_top_sessions, backup_configuration).
 2. Analyze the outputs carefully:
+   - When asked about security posture, hardening, compliance, or firewall policy conflicts, invoke `run_security_audit` to obtain the quantitative security score (0-100), letter grade (A-F), policy shadowing analysis, and CLI hardening playbook.
+   - You can actively apply UTM hardening (AV, IPS, WebFilter, SSL inspection, full logging) to uninspected policies using `apply_policy_hardening`.
    - Check if any interfaces are unexpectedly down (especially WAN interfaces with a link status of 'down').
    - Check SD-WAN health metrics (get_sdwan_status) for packet loss, high latency/jitter, or SLA failure.
    - Check HA cluster status (get_ha_status) for sync status ('in-sync' vs out-of-sync checksums) and node health.

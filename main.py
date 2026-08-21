@@ -36,6 +36,7 @@ logger = logging.getLogger("FortiGateMain")
 from config import Config
 from fortigate_client import FortiGateClient
 from agent import FortiGateAgent
+from security_audit import FortiGateSecurityAuditor, SecurityAuditReport
 
 console = Console()
 
@@ -509,6 +510,59 @@ def run_agentic_mode(agent: FortiGateAgent, prompt: Optional[str] = None):
     # Display Final Assessment
     console.print(Panel(Markdown(result["final_response"]), title="Final Agentic Assessment", border_style="purple"))
 
+def run_security_audit_mode(client: FortiGateClient, playbook_path: Optional[str] = None, output_json: bool = False):
+    """Executes the full FortiOS Security Posture & CIS Hardening Benchmark Audit."""
+    auditor = FortiGateSecurityAuditor(client)
+
+    if output_json:
+        try:
+            report = auditor.run_audit()
+            json_output = json.dumps(report.to_dict(), indent=2)
+            print(json_output)
+            if Config.OUTPUT_FILE:
+                export_report(json_output, Config.OUTPUT_FILE, is_json=True)
+            if playbook_path:
+                with open(playbook_path, "w", encoding="utf-8") as f:
+                    f.write(report.generate_hardening_playbook())
+        except Exception as e:
+            print(json.dumps({"error": f"Security Audit Error: {e}"}))
+        return
+
+    console.print("\n[bold purple]Running FortiOS Security Posture & CIS Hardening Benchmark Audit...[/bold purple]")
+    with console.status("[bold purple]Auditing firewall policies, shadow rules, management access, FortiGuard subscriptions, HA sync, and VPN crypto...") as status:
+        try:
+            report = auditor.run_audit()
+        except Exception as e:
+            console.print(f"[red]Failed to execute security audit: {e}[/red]")
+            return
+
+    # Render Visual Scorecard & Finding Tables
+    auditor.print_terminal_report(report, console=console)
+
+    # Export hardening playbook if requested
+    if playbook_path:
+        playbook_content = report.generate_hardening_playbook()
+        try:
+            with open(playbook_path, "w", encoding="utf-8") as f:
+                f.write(playbook_content)
+            console.print(Panel(
+                f"[green]✓ Hardening Playbook successfully exported to:[/green] [bold cyan]{playbook_path}[/bold cyan]\n"
+                f"Contains [bold]{report.failed_count + len(report.shadowing_issues)}[/bold] validated FortiOS CLI remediation commands.",
+                title="FortiOS Hardening Playbook Export",
+                border_style="green"
+            ))
+        except Exception as e:
+            console.print(f"[red]Failed to export hardening playbook to '{playbook_path}': {e}[/red]")
+
+    # Export report if configured
+    if Config.OUTPUT_FILE:
+        if Config.OUTPUT_FILE.lower().endswith(".json"):
+            export_report(json.dumps(report.to_dict(), indent=2), Config.OUTPUT_FILE, is_json=True)
+        elif Config.OUTPUT_FILE.lower().endswith(".html"):
+            export_report_to_html(report.to_markdown(), Config.OUTPUT_FILE, title=f"FortiOS Security Posture Audit - {report.hostname}")
+            console.print(f"[green]✓ Security audit HTML report exported to:[/green] [bold cyan]{Config.OUTPUT_FILE}[/bold cyan]")
+        else:
+            export_report(report.to_markdown(), Config.OUTPUT_FILE, is_json=False)
 
 def parse_args():
     """Parses command-line arguments for CLI overrides."""
@@ -518,7 +572,7 @@ def parse_args():
     parser.add_argument(
         "command",
         nargs="?",
-        choices=["diagnose", "interactive", "agentic", "config", "backup"],
+        choices=["diagnose", "interactive", "agentic", "config", "backup", "audit"],
         help="Command to run directly. If omitted, displays the interactive selection menu."
     )
     parser.add_argument(
@@ -543,7 +597,11 @@ def parse_args():
     )
     parser.add_argument(
         "--output", "-o",
-        help="Export diagnostic report to a file (.md, .html, or .json)."
+        help="Export diagnostic or audit report to a file (.md, .html, or .json)."
+    )
+    parser.add_argument(
+        "--playbook",
+        help="Export automated FortiOS CLI hardening playbook to a file (.conf)."
     )
     parser.add_argument(
         "--ip", "-i",
@@ -614,8 +672,8 @@ def main():
         Config.MOCK_MODE = True
 
     if args.json:
-        # Check API key without interactive prompt
-        if not Config.GEMINI_API_KEY:
+        # Check API key without interactive prompt if not audit
+        if args.command != "audit" and not Config.GEMINI_API_KEY:
             import json
             print(json.dumps({"error": "Gemini API key is not configured. Specify GEMINI_API_KEY in environment or .env file."}))
             sys.exit(1)
@@ -631,7 +689,8 @@ def main():
                 title="💡 Gemini Model & Precision Advisory",
                 border_style="yellow"
             ))
-        ensure_api_key()
+        if args.command != "audit":
+            ensure_api_key()
 
     # Initialize Client
     client = FortiGateClient(
@@ -659,8 +718,8 @@ def main():
             console.print(f"[red]Error initializing AI Agent: {e}[/red]")
         sys.exit(1)
 
-    # If --json is set, default command is diagnose
-    if args.json:
+    # If --json is set without explicit command, default is diagnose
+    if args.json and not args.command:
         run_diagnostics(agent, output_json=True)
         return
 
@@ -668,13 +727,16 @@ def main():
     if args.command:
         cmd = args.command.lower()
         if cmd == "diagnose":
-            run_diagnostics(agent, output_json=False)
+            run_diagnostics(agent, output_json=args.json)
             return
         elif cmd == "interactive":
             run_interactive_mode(agent)
             return
         elif cmd == "agentic":
             run_agentic_mode(agent, prompt=args.prompt)
+            return
+        elif cmd == "audit":
+            run_security_audit_mode(client, playbook_path=args.playbook, output_json=args.json)
             return
         elif cmd == "config":
             # Configuration was already printed
@@ -700,11 +762,12 @@ def main():
         console.print(" 1. Run Automated Diagnostics & Health Report")
         console.print(" 2. Enter Interactive Chat Console")
         console.print(" 3. Run Autonomous Agentic Reasoning Call")
-        console.print(" 4. Create Configuration Snapshot Backup")
-        console.print(" 5. View Current Configuration Settings")
-        console.print(" 6. Exit")
+        console.print(" 4. Run FortiOS Security Posture & CIS Hardening Benchmark")
+        console.print(" 5. Create Configuration Snapshot Backup")
+        console.print(" 6. View Current Configuration Settings")
+        console.print(" 7. Exit")
         
-        choice = Prompt.ask("Enter selection (1-6)", choices=["1", "2", "3", "4", "5", "6"], default="1")
+        choice = Prompt.ask("Enter selection (1-7)", choices=["1", "2", "3", "4", "5", "6", "7"], default="1")
         
         if choice == "1":
             run_diagnostics(agent, output_json=False)
@@ -713,6 +776,11 @@ def main():
         elif choice == "3":
             run_agentic_mode(agent)
         elif choice == "4":
+            playbook_opt = None
+            if Confirm.ask("Would you like to export the automated FortiOS Hardening Playbook (.conf)?", default=True):
+                playbook_opt = Prompt.ask("Enter destination playbook path", default="fortigate_hardening_playbook.conf")
+            run_security_audit_mode(client, playbook_path=playbook_opt, output_json=False)
+        elif choice == "5":
             with console.status("[bold green]Creating configuration snapshot backup..."):
                 try:
                     res = client.backup_configuration()
@@ -725,9 +793,9 @@ def main():
                     ))
                 except Exception as e:
                     console.print(f"[red]Failed to create backup: {e}[/red]")
-        elif choice == "5":
-            Config.print_status()
         elif choice == "6":
+            Config.print_status()
+        elif choice == "7":
             console.print("[green]Goodbye![/green]")
             break
 

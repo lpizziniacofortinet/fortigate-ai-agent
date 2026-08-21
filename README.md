@@ -1,13 +1,14 @@
 # FortiGate AI Operations & Diagnostics Agent
 
-A production-ready AI operations and troubleshooting agent written in Python that interfaces directly with FortiGate firewalls running FortiOS (v7.0+) using the modern **`google-genai`** SDK. The agent is equipped with 24 custom function-calling tools that enable it to dynamically retrieve, inspect, correlate, and remediate network configurations, resource utilization, interfaces, active session tables (top talkers), SD-WAN health metrics, VPN tunnels, dynamic routing adjacencies (BGP & OSPF), ARP tables, DHCP leases, FortiGuard security subscriptions (AV/IPS/WebFilter), quarantined threat actors, firewall security policies, system configuration backups, and event logs.
+A production-ready AI operations and troubleshooting agent written in Python that interfaces directly with FortiGate firewalls running FortiOS (v7.0+) using the modern **`google-genai`** SDK. The agent is equipped with 25 custom function-calling tools that enable it to dynamically retrieve, inspect, correlate, audit, and remediate network configurations, resource utilization, interfaces, active session tables (top talkers), SD-WAN health metrics, VPN tunnels, dynamic routing adjacencies (BGP & OSPF), ARP tables, DHCP leases, FortiGuard security subscriptions (AV/IPS/WebFilter), quarantined threat actors, firewall security policies, policy shadowing conflicts, system configuration backups, and event logs.
 
-It provides five operational modes:
+It provides six operational modes:
 1. **Automated Diagnostics**: Gathers operational metrics across all subsystems, passes them to the AI agent, and generates a structured markdown-based health assessment and troubleshooting plan.
 2. **Interactive Console**: A stateful chat session where you can ask arbitrary questions about the FortiGate, and the AI agent autonomously decides which API tools to invoke in the background.
 3. **Autonomous Agentic Call**: Multi-step chain-of-thought call loop where the AI agent autonomously executes tool calls, inspects findings, triggers follow-up telemetry (e.g. log queries or firewall policy inspections), and prints a live reasoning trace of all tools called.
-4. **Configuration Backup**: Generates an immediate full system configuration snapshot (`.conf`) for disaster recovery and change auditing.
-5. **Configuration Inspector**: Displays active environment variables, target VDOM, SSL verification modes, and Gemini model settings.
+4. **Security Posture & CIS Hardening Benchmark**: Comprehensive multi-domain security audit computing a quantitative Security Health Score (0-100), letter grade (A+ through F), policy shadowing / precedence conflict detection, management interface exposure auditing, and automated FortiOS CLI hardening playbook export (`.conf`).
+5. **Configuration Backup**: Generates an immediate full system configuration snapshot (`.conf`) for disaster recovery and change auditing.
+6. **Configuration Inspector**: Displays active environment variables, target VDOM, SSL verification modes, and Gemini model settings.
 
 It also features a high-fidelity **Mock Mode** for offline testing and demonstration purposes without requiring a physical or virtual FortiGate appliance.
 
@@ -48,12 +49,13 @@ For authentication, the client utilizes the secure **`Authorization: Bearer <API
 
 ## AI Agent Tools Reference (Function Calling)
 
-The AI Agent exposes 24 Python function-calling tools (`FORTIGATE_TOOLS`) registered directly with the Gemini model via the modern `google-genai` SDK. In interactive or agentic modes, the model autonomously analyzes user queries, selects appropriate tools, executes them, and synthesizes operational findings.
+The AI Agent exposes 26 Python function-calling tools (`FORTIGATE_TOOLS`) registered directly with the Gemini model via the modern `google-genai` SDK. In interactive or agentic modes, the model autonomously analyzes user queries, selects appropriate tools, executes them, and synthesizes operational findings.
 
-### 1. Read-Only Telemetry & Inspection Tools (17 Tools)
+### 1. Read-Only Telemetry, Audit & Inspection Tools (18 Tools)
 
 | Tool Name | Parameters | Description / Telemetry Gathered |
 | :--- | :--- | :--- |
+| **`run_security_audit`** | _None_ | Executes full FortiOS Security Posture & CIS Hardening Benchmark Audit, computing the 0-100 score, letter grade (A-F), policy shadowing conflicts, and automated CLI hardening playbook. |
 | **`get_system_status`** | _None_ | Retrieves hostname, firmware version, build number, serial number, uptime, HA cluster role, and operation mode. |
 | **`get_system_resources`** | _None_ | Retrieves CPU utilization (%), memory usage (%), active and maximum concurrent sessions, and disk usage. |
 | **`get_top_sessions`** | `limit` (int, default: `10`), `sort_by` (str, default: `"bytes"`) | Retrieves active firewall session table entries, sorted by bandwidth consumption (`bytes`), packets, or duration, plus top talker sources/destinations. |
@@ -72,7 +74,7 @@ The AI Agent exposes 24 Python function-calling tools (`FORTIGATE_TOOLS`) regist
 | **`get_ha_status`** | _None_ | Monitors High Availability (HA) cluster status, peer members, sync state (`in-sync`/out-of-sync), and checksum matches. |
 | **`get_vdom_list`** | _None_ | Lists configured Virtual Domains (VDOMs) and cluster partition IDs for multi-tenant deployments. |
 
-### 2. Active Remediation & Write Tools (7 Tools)
+### 2. Active Remediation & Write Tools (8 Tools)
 
 > [!NOTE]
 > All write tools require `ENABLE_WRITE_ACTIONS=True` (or `--enable-write` CLI flag) and an API token with read-write permissions. In interactive terminal sessions, the agent will always request explicit confirmation (`y/N`) before modifying any configuration. When `DRY_RUN=True` or `--dry-run` is specified, write actions are safely simulated.
@@ -80,6 +82,7 @@ The AI Agent exposes 24 Python function-calling tools (`FORTIGATE_TOOLS`) regist
 | Tool Name | Parameters | Target Remediation Action |
 | :--- | :--- | :--- |
 | **`backup_configuration`** | `destination_dir` (str, default: `".backups"`) | Downloads and saves a complete timestamped configuration snapshot (.conf) locally. |
+| **`apply_policy_hardening`** | `policy_id` (int) | Applies UTM security profiles (AV, IPS, Web Filter, SSL inspection) and session logging directly to a policy via REST API. |
 | **`quarantine_ip_address`** | `ip_address` (str), `duration_seconds` (int, default: `3600`), `reason` (str, default: `""`) | Bans and quarantines a malicious or compromised IP address on the FortiGate firewall. |
 | **`reset_vpn_tunnel`** | `p1_name` (str) | Flushes and resets an IPsec Phase 1 VPN tunnel to restart IKE/IPsec negotiations. |
 | **`toggle_interface`** | `interface_name` (str), `status` (`"up"` \| `"down"`) | Administratively enables (`up`) or disables (`down`) a network interface. |
@@ -198,25 +201,28 @@ You can bypass the menu and directly run specific commands or override settings 
 
 ```bash
 # General Syntax
-python3 main.py [diagnose | interactive | agentic | config | backup] [options]
+python3 main.py [diagnose | interactive | agentic | audit | config | backup] [options]
 
 # Examples:
 # 1. Run automated diagnostics and export an executive HTML dashboard report
 python3 main.py diagnose --output report.html
 
-# 2. Run diagnostics against a live firewall with custom port and VDOM
+# 2. Run FortiOS Security Posture & CIS Hardening Benchmark with automated CLI Playbook export
+python3 main.py audit --playbook fortigate_hardening_playbook.conf --output fortigate_audit.html
+
+# 3. Run diagnostics against a live firewall with custom port and VDOM
 python3 main.py diagnose --ip 10.0.0.1 --port 8443 --vdom CustomVDOM --verify-ssl
 
-# 3. Launch interactive console in offline Mock Mode
+# 4. Launch interactive console in offline Mock Mode
 python3 main.py interactive --mock
 
-# 4. Run interactive console with Safety Dry Run mode enabled
+# 5. Run interactive console with Safety Dry Run mode enabled
 python3 main.py interactive --enable-write --dry-run
 
-# 5. Create an immediate configuration backup snapshot
+# 6. Create an immediate configuration backup snapshot
 python3 main.py backup
 
-# 6. Run autonomous multi-step agentic call with execution tracing
+# 7. Run autonomous multi-step agentic call with execution tracing
 python3 main.py agentic
 ```
 
@@ -224,12 +230,13 @@ python3 main.py agentic
 
 | Flag | Short | Description |
 | :--- | :--- | :--- |
-| `command` | _Positional_ | Command to execute: `diagnose`, `interactive`, `agentic`, `config`, `backup`. (Default: Interactive Menu). |
-| `--json` | `-j` | Output parsed diagnostics result in raw structured JSON (suppresses banner and TUI prints). |
+| `command` | _Positional_ | Command to execute: `diagnose`, `interactive`, `agentic`, `audit`, `config`, `backup`. (Default: Interactive Menu). |
+| `--json` | `-j` | Output parsed diagnostics or security audit result in raw structured JSON (suppresses banner and TUI prints). |
 | `--mock` | `-m` | Force offline Mock Mode (simulated responses). |
+| `--playbook` | _None_ | Export automated FortiOS CLI hardening playbook to a file (`.conf`). |
 | `--enable-write` | `-w` | Enable active write/mitigation actions (disabled by default for safety). |
 | `--dry-run` | `-d` | Simulate write actions safely without modifying firewall configuration. |
-| `--output` | `-o` | Export diagnostic report to a standalone HTML (`.html`), Markdown (`.md`), or JSON (`.json`) file. |
+| `--output` | `-o` | Export diagnostic or security audit report to a standalone HTML (`.html`), Markdown (`.md`), or JSON (`.json`) file. |
 | `--ip` | `-i` | Override the target FortiGate IP address. |
 | `--token` | `-t` | Override the FortiGate REST API Access Token. |
 | `--port` | `-p` | Override the target connection port (default: `443`). |
