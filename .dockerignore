@@ -1,0 +1,44 @@
+# =====================================================================
+# Docker Ignore Rules - FortiGate AI Agent
+# Prevents sensitive environment variables, credentials, backups, logs,
+# and build artifacts from being copied into container image layers.
+# =====================================================================
+
+# Sensitive environment & secret files (CRITICAL: Never bake secrets into image layers)
+.env
+.env.local
+.env.*
+*.env
+
+# Git metadata & repository history
+.git/
+.gitignore
+
+# Local backups & generated configuration playbooks
+.backups/
+*.conf
+*.html
+
+# Python bytecode, caches & tests
+__pycache__/
+*.py[cod]
+*.class
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv/
+
+# Audit logs & temporary files
+*.log
+fortigate_agent.log
+
+# IDE & OS metadata
+.DS_Store
+.vscode/
+.idea/
+*.swp

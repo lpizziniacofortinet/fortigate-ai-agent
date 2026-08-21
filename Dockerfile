@@ -15,6 +15,15 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy the rest of the application code
 COPY . /app/
 
+# Create a non-privileged user and configure permissions
+RUN useradd -m -u 1000 appuser && \
+    mkdir -p /app/.backups && \
+    touch /app/fortigate_agent.log && \
+    chown -R appuser:appuser /app
+
+# Switch to non-root user
+USER appuser
+
 # Set the default command to run when the container starts
 ENTRYPOINT ["python", "main.py"]
 CMD ["diagnose"]

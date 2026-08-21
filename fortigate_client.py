@@ -565,11 +565,13 @@ class FortiGateClient:
         """
         Retrieves a full system configuration snapshot from the FortiGate and saves it locally.
         """
-        os.makedirs(destination_dir, exist_ok=True)
+        clean_dir = os.path.normpath(destination_dir)
+        os.makedirs(clean_dir, exist_ok=True)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         host_tag = self.host if self.host else "mock_fortigate"
-        file_name = f"fortigate_backup_{host_tag}_{timestamp}.conf"
-        file_path = os.path.join(destination_dir, file_name)
+        safe_host_tag = "".join(c for c in host_tag if c.isalnum() or c in ".-_")
+        file_name = f"fortigate_backup_{safe_host_tag}_{timestamp}.conf"
+        file_path = os.path.join(clean_dir, file_name)
 
         if self.mock:
             content = (

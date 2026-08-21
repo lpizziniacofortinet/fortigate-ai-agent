@@ -115,6 +115,7 @@ def export_report_to_html(markdown_content: str, output_path: str, title: str = 
         .footer {{ text-align: center; color: var(--text-muted); font-size: 0.85rem; margin-top: 3rem; }}
     </style>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.9/dist/purify.min.js"></script>
 </head>
 <body>
     <div class="container">
@@ -132,7 +133,9 @@ def export_report_to_html(markdown_content: str, output_path: str, title: str = 
     <script>
         if (typeof marked !== 'undefined') {{
             const rawContent = {json.dumps(markdown_content)};
-            document.getElementById('report-content').innerHTML = marked.parse(rawContent);
+            const parsedHTML = marked.parse(rawContent);
+            const sanitizedHTML = typeof DOMPurify !== 'undefined' ? DOMPurify.sanitize(parsedHTML) : parsedHTML;
+            document.getElementById('report-content').innerHTML = sanitizedHTML;
         }}
     </script>
 </body>
@@ -209,7 +212,12 @@ def ensure_api_key():
                 
                 with open(env_path, "w") as f:
                     f.write(content)
-                console.print("[green]API Key saved to .env successfully.[/green]")
+                import stat
+                try:
+                    os.chmod(env_path, stat.S_IRUSR | stat.S_IWUSR)
+                except Exception:
+                    pass
+                console.print("[green]API Key saved to .env successfully (permissions restricted to 0600).[/green]")
             except Exception as e:
                 console.print(f"[red]Failed to save API key to .env: {e}[/red]")
 
