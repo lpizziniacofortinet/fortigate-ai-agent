@@ -1,6 +1,6 @@
 # FortiGate AI Operations & Diagnostics Agent
 
-A production-ready AI operations and troubleshooting agent written in Python that interfaces directly with FortiGate firewalls running FortiOS (v7.0+) using the modern **`google-genai`** SDK. The agent is equipped with 25 custom function-calling tools that enable it to dynamically retrieve, inspect, correlate, audit, and remediate network configurations, resource utilization, interfaces, active session tables (top talkers), SD-WAN health metrics, VPN tunnels, dynamic routing adjacencies (BGP & OSPF), ARP tables, DHCP leases, FortiGuard security subscriptions (AV/IPS/WebFilter), quarantined threat actors, firewall security policies, policy shadowing conflicts, system configuration backups, and event logs.
+A production-ready AI operations and troubleshooting agent written in Python that interfaces directly with FortiGate firewalls running FortiOS (v7.0+) using the modern **`google-genai`** SDK. The agent is equipped with 26 custom function-calling tools that enable it to dynamically retrieve, inspect, correlate, audit, and remediate network configurations, resource utilization, interfaces, active session tables (top talkers), SD-WAN health metrics, VPN tunnels, dynamic routing adjacencies (BGP & OSPF), ARP tables, DHCP leases, FortiGuard security subscriptions (AV/IPS/WebFilter), quarantined threat actors, firewall security policies, policy shadowing conflicts, system configuration backups, and event logs.
 
 It provides six operational modes:
 1. **Automated Diagnostics**: Gathers operational metrics across all subsystems, passes them to the AI agent, and generates a structured markdown-based health assessment and troubleshooting plan.
@@ -354,6 +354,7 @@ python3 -m unittest -v tests/test_agent_reasoning.py
 ├── config.py                # Centralized configuration loader and status printer
 ├── fortigate_client.py      # FortiOS REST API client, tenacity retries, and mock engine
 ├── main.py                  # CLI driver, argument parser, TUI banner, and interactive loop
+├── security_audit.py        # FortiOS Security Posture & CIS Hardening Benchmark Engine
 ├── requirements.txt         # Python package dependencies
 ├── .env.template            # Environment variables configuration template
 ├── .env                     # Local environment configuration (git-ignored)
@@ -362,7 +363,8 @@ python3 -m unittest -v tests/test_agent_reasoning.py
 ├── fortigate-ai-agent.1     # Linux manual page (man page)
 ├── fortigate_agent.log      # Persistent audit log file
 ├── tests/
-│   └── test_agent_reasoning.py  # Unit tests and multi-step reasoning integration tests
+│   ├── test_agent_reasoning.py  # Unit tests and multi-step reasoning integration tests
+│   └── test_security_audit.py   # Security Posture & CIS Hardening Benchmark tests
 └── LICENSE                  # MIT License
 ```
 
@@ -423,28 +425,6 @@ This log captures:
 * Exact request URLs, parameters, and SSL certificate verification paths.
 * Rate-limiting (HTTP 429) events and Tenacity exponential backoff retries.
 * AI function-calling reasoning traces and remediation tool executions.
-
----
-
-## References & Documentation
-
-### Fortinet & FortiOS Resources
-- [Fortinet Document Library](https://docs.fortinet.com/) — Official FortiOS administration, configuration, and architecture guides.
-- [FortiOS REST API Reference (v7.0 - v7.6+)](https://docs.fortinet.com/document/fortigate/7.4.0/rest-api-reference) — FortiOS REST API CMDB and Monitor endpoint specifications.
-- [Fortinet Developer Network (FNDN)](https://fndn.fortinet.net/) — Developer resources, schemas, and API documentation for Fortinet solutions.
-- [Fortinet FortiGate Best Practices](https://docs.fortinet.com/document/fortigate/7.4.0/best-practices) — Hardening, high availability, and security guidelines.
-
-### Google Gemini & SDK Documentation
-- [Google GenAI Python SDK (`google-genai`)](https://github.com/googleapis/python-genai) — Next-generation Python SDK for Gemini models.
-- [Google AI Studio](https://aistudio.google.com/) — Developer console for API key provisioning and prompt engineering.
-- [Gemini Function Calling Guide](https://ai.google.dev/gemini-api/docs/function-calling) — Architecture specifications for structured tool calling and schema validation.
-
-### Networking & Security RFC Standards
-- [RFC 4271](https://datatracker.ietf.org/doc/html/rfc4271) — A Border Gateway Protocol 4 (BGP-4).
-- [RFC 2328](https://datatracker.ietf.org/doc/html/rfc2328) — OSPF Version 2.
-- [RFC 4301](https://datatracker.ietf.org/doc/html/rfc4301) — Security Architecture for the Internet Protocol (IPsec).
-- [RFC 826](https://datatracker.ietf.org/doc/html/rfc826) — Ethernet Address Resolution Protocol (ARP).
-- [RFC 2131](https://datatracker.ietf.org/doc/html/rfc2131) — Dynamic Host Configuration Protocol (DHCP).
 
 ---
 
