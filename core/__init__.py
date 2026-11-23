@@ -25,6 +25,8 @@ from core.llm_provider import (
 from core.agent_base import BaseAgent
 from core.task_manager import BoundedTaskManager
 from core.orchestrator import OrchestratorAgent
+from core.policy_engine import DeterministicPolicyEngine, PolicyDecision, PolicyViolationError
+from core.topology import NetworkTopologyGraph, TopologyNode, TopologyEdge
 
 __all__ = [
     "AgentRole",
@@ -48,4 +50,10 @@ __all__ = [
     "BaseAgent",
     "BoundedTaskManager",
     "OrchestratorAgent",
+    "DeterministicPolicyEngine",
+    "PolicyDecision",
+    "PolicyViolationError",
+    "NetworkTopologyGraph",
+    "TopologyNode",
+    "TopologyEdge",
 ]
