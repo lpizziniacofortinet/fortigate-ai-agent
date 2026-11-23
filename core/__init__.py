@@ -10,6 +10,8 @@ from core.schemas import (
     ModelProvenance,
     InvestigationTask,
     AgentResult,
+    InvestigationPlan,
+    OrchestratorReport,
 )
 from core.context import InvestigationContext
 from core.llm_provider import (
@@ -21,6 +23,8 @@ from core.llm_provider import (
     ModelRegistry,
 )
 from core.agent_base import BaseAgent
+from core.task_manager import BoundedTaskManager
+from core.orchestrator import OrchestratorAgent
 
 __all__ = [
     "AgentRole",
@@ -32,6 +36,8 @@ __all__ = [
     "ModelProvenance",
     "InvestigationTask",
     "AgentResult",
+    "InvestigationPlan",
+    "OrchestratorReport",
     "InvestigationContext",
     "ModelConfig",
     "ProviderResponse",
@@ -40,4 +46,6 @@ __all__ = [
     "DeterministicMockProvider",
     "ModelRegistry",
     "BaseAgent",
+    "BoundedTaskManager",
+    "OrchestratorAgent",
 ]

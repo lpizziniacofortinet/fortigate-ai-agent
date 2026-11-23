@@ -122,3 +122,36 @@ class AgentResult(BaseModel):
     model_provenance: Optional[ModelProvenance] = None
     started_at: str = Field(default_factory=utc_now_iso)
     completed_at: str = Field(default_factory=utc_now_iso)
+
+
+class InvestigationPlan(BaseModel):
+    """Execution plan built by the Orchestrator selecting only relevant specialist agents."""
+    plan_id: str = Field(default_factory=lambda: uuid.uuid4().hex[:12])
+    correlation_id: str
+    user_request: str
+    selected_roles: List[AgentRole] = Field(default_factory=list)
+    tasks: List[InvestigationTask] = Field(default_factory=list)
+    rationale: str = ""
+
+
+class OrchestratorReport(BaseModel):
+    """Unified, evidence-backed diagnostic report synthesized by the Orchestrator Agent."""
+    correlation_id: str
+    user_request: str
+    device: str = ""
+    vdom: str = "root"
+    overall_status: str = Field(
+        default="unknown",
+        description="Overall posture: healthy, degraded, critical, or unknown",
+    )
+    confidence: ConfidenceLevel = Field(default=ConfidenceLevel.MEDIUM)
+    executive_summary: str = ""
+    plan: InvestigationPlan
+    specialist_results: List[AgentResult] = Field(default_factory=list)
+    correlated_findings: List[AgentFinding] = Field(default_factory=list)
+    contradictions: List[str] = Field(default_factory=list)
+    unknowns: List[str] = Field(default_factory=list)
+    recommended_actions: List[str] = Field(default_factory=list)
+    model_provenance: Optional[ModelProvenance] = None
+    started_at: str = Field(default_factory=utc_now_iso)
+    completed_at: str = Field(default_factory=utc_now_iso)

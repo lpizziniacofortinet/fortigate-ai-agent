@@ -136,6 +136,13 @@ class BaseAgent(ABC):
         cleaned = self._strip_json_fences(resp.text)
         try:
             result = AgentResult.model_validate_json(cleaned)
+            # Authoritative runtime identity fields cannot be spoofed by model output
+            result.agent_name = self.name
+            result.agent_role = self.role
+            result.task_id = task.task_id
+            result.correlation_id = task.correlation_id
+            result.device = context.device
+            result.vdom = context.vdom
             result.tools_executed = result.tools_executed or resp.tools_executed
             result.model_provenance = resp.model_provenance
             result.started_at = started_at
