@@ -655,7 +655,7 @@ def parse_args():
     )
     parser.add_argument(
         "--model",
-        help="Override Gemini model name (e.g. gemini-2.5-flash, gemini-2.5-pro, gemini-1.5-pro)."
+        help="Override Gemini model name (e.g. gemini-4-carbon, gemini-4-neon, gemini-4-argon, gemini-3.1-pro-preview)."
     )
     parser.add_argument(
         "--prompt",
@@ -717,9 +717,9 @@ def main():
         if "2.5" in Config.GEMINI_MODEL or "flash" in Config.GEMINI_MODEL.lower():
             console.print(Panel(
                 f"[yellow]Current Model ({Config.GEMINI_MODEL}):[/yellow]\n"
-                "Flash & 2.5 series models (e.g. gemini-2.5-flash, gemini-3.5-flash) are optimized for high-speed diagnostics.\n"
-                "For deeper root-cause analysis, multi-step chain-of-thought reasoning, or complex network troubleshooting,\n"
-                "consider upgrading to flagship precision models (e.g. [cyan]gemini-2.5-pro[/cyan], [cyan]gemini-3.1-pro-preview[/cyan], or [cyan]gemini-pro-latest[/cyan]) using [bold]--model <name>[/bold].",
+                "Lightweight or legacy Flash/2.5 models trade reasoning depth for speed.\n"
+                "For complex root-cause analysis, multi-step security correlation, and remediation planning,\n"
+                "use flagship Gemini 4 models ([cyan]gemini-4-carbon[/cyan] or [cyan]gemini-4-neon[/cyan]) via [bold]--model <name>[/bold].",
                 title="💡 Gemini Model & Precision Advisory",
                 border_style="yellow"
             ))

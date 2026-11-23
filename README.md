@@ -120,7 +120,7 @@ Open `.env` and fill in your settings:
 ```ini
 # Gemini API Key (Required for AI Agent operations)
 GEMINI_API_KEY=your_gemini_api_key_here
-GEMINI_MODEL=gemini-2.5-flash
+GEMINI_MODEL=gemini-4-neon
 
 # FortiGate Connection Details
 # Leave empty to automatically use high-fidelity MOCK MODE
@@ -150,7 +150,9 @@ BACKUP_BEFORE_WRITE=True
 | Variable | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
 | `GEMINI_API_KEY` | String | _None_ | Google Gemini API key for AI reasoning. |
-| `GEMINI_MODEL` | String | `gemini-2.5-flash` | Target Gemini model (`gemini-2.5-flash`, `gemini-2.5-pro`, `gemini-3.5-flash`, `gemini-3.1-pro-preview`, `gemini-pro-latest`). |
+| `GEMINI_MODEL` | String | `gemini-4-neon` | Target Gemini model (`gemini-4-carbon`, `gemini-4-neon`, `gemini-4-argon`, `gemini-3.1-pro-preview`). |
+| `ORCHESTRATOR_MODEL` | String | `gemini-4-carbon` | Highest-capability flagship reasoning model for multi-agent orchestration and correlation. |
+| `SPECIALIST_MODEL` | String | `gemini-4-neon` | Default flagship model for domain specialist agents. |
 | `FORTIGATE_IP` | String | `""` | IP address or hostname of the FortiGate firewall. |
 | `FORTIGATE_TOKEN` | String | `""` | REST API Access Token generated in FortiOS GUI. |
 | `FORTIGATE_PORT` | Integer | `443` | Target API connection port. |
@@ -244,7 +246,7 @@ python3 main.py agentic
 | `--verify-ssl` | `-k` | Enable HTTPS certificate verification (default). |
 | `--insecure` | _None_ | Explicitly disable HTTPS TLS certificate verification (lab troubleshooting only; emits warning). |
 | `--ca-bundle` | `-c` | Path to custom CA certificate bundle file (enables certificate verification). |
-| `--model` | _None_ | Override Gemini model (e.g. `gemini-2.5-flash`, `gemini-2.5-pro`, `gemini-3.5-flash`, `gemini-pro-latest`). |
+| `--model` | _None_ | Override Gemini model (e.g. `gemini-4-carbon`, `gemini-4-neon`, `gemini-4-argon`, `gemini-3.1-pro-preview`). |
 | `--help` | `-h` | Show CLI help message and exit. |
 
 ---
@@ -252,10 +254,11 @@ python3 main.py agentic
 ## Gemini Model Selection & Precision Advisory
 
 The agent supports selecting different Gemini models based on your operational requirements:
-* **Flash Series (`gemini-2.5-flash`, `gemini-3.5-flash`)**: High-speed, low-latency execution ideal for routine diagnostics, automated cron polling, and CI/CD pipelines.
-* **Pro & Precision Series (`gemini-2.5-pro`, `gemini-3.1-pro-preview`, `gemini-pro-latest`)**: Recommended for complex multi-tier root-cause analysis, dynamic routing correlation, and multi-step autonomous troubleshooting.
+* **Flagship Reasoning (`gemini-4-carbon`)**: Strongest multi-step reasoning model for complex root-cause analysis, security correlation, orchestration, and remediation planning.
+* **Frontier Enterprise (`gemini-4-neon`)**: Default flagship model offering frontier accuracy, low fabrication rates, and strong end-to-end tool execution.
+* **Efficient Reasoning (`gemini-4-argon`) & Previous Gen (`gemini-3.1-pro-preview`)**: Optional alternatives when optimizing latency or operating in projects without Gemini 4 access.
 
-Override the model via `.env` (`GEMINI_MODEL=gemini-2.5-pro`) or CLI flag (`--model gemini-2.5-pro`).
+Override the model via `.env` (`GEMINI_MODEL=gemini-4-carbon`) or CLI flag (`--model gemini-4-carbon`).
 
 ---
 

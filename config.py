@@ -7,9 +7,11 @@ load_dotenv()
 class Config:
     """Configuration class for FortiGate AI Agent."""
     
-    # Gemini API settings
+    # Gemini API settings (highest-capability flagship defaults)
     GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-    GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+    GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-4-neon")
+    ORCHESTRATOR_MODEL = os.getenv("ORCHESTRATOR_MODEL", "gemini-4-carbon")
+    SPECIALIST_MODEL = os.getenv("SPECIALIST_MODEL", GEMINI_MODEL)
     
     # FortiGate settings
     FORTIGATE_IP = os.getenv("FORTIGATE_IP", "")
