@@ -3,6 +3,7 @@ import logging
 import warnings
 from urllib.parse import quote
 import requests
+import urllib3
 from datetime import datetime
 from typing import Dict, Any, List, Optional
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
@@ -133,13 +134,16 @@ class FortiGateClient:
 
         try:
             logger.info(f"Sending GET request to {url} (params: {req_params}, verify: {verify_path})")
-            response = requests.get(
-                url,
-                headers=self.headers,
-                params=req_params,
-                verify=verify_path,
-                timeout=10
-            )
+            with warnings.catch_warnings():
+                if verify_path is False:
+                    warnings.simplefilter("ignore", urllib3.exceptions.InsecureRequestWarning)
+                response = requests.get(
+                    url,
+                    headers=self.headers,
+                    params=req_params,
+                    verify=verify_path,
+                    timeout=10
+                )
             # Explicitly check for rate limiting (HTTP 429) to trigger retry
             if response.status_code == 429:
                 logger.warning("API rate limit hit (429). Retrying...")
@@ -177,13 +181,16 @@ class FortiGateClient:
 
         try:
             logger.info(f"Sending raw GET request to {url} (params: {req_params}, verify: {verify_path})")
-            response = requests.get(
-                url,
-                headers=raw_headers,
-                params=req_params,
-                verify=verify_path,
-                timeout=30
-            )
+            with warnings.catch_warnings():
+                if verify_path is False:
+                    warnings.simplefilter("ignore", urllib3.exceptions.InsecureRequestWarning)
+                response = requests.get(
+                    url,
+                    headers=raw_headers,
+                    params=req_params,
+                    verify=verify_path,
+                    timeout=30
+                )
             if response.status_code == 429:
                 logger.warning("API rate limit hit (429). Retrying...")
                 response.raise_for_status()
@@ -221,14 +228,17 @@ class FortiGateClient:
 
         try:
             logger.info(f"Sending PUT request to {url} (params: {req_params}, verify: {verify_path})")
-            response = requests.put(
-                url,
-                headers=self.headers,
-                params=req_params,
-                json=json_data,
-                verify=verify_path,
-                timeout=10
-            )
+            with warnings.catch_warnings():
+                if verify_path is False:
+                    warnings.simplefilter("ignore", urllib3.exceptions.InsecureRequestWarning)
+                response = requests.put(
+                    url,
+                    headers=self.headers,
+                    params=req_params,
+                    json=json_data,
+                    verify=verify_path,
+                    timeout=10
+                )
             if response.status_code == 429:
                 logger.warning("API rate limit hit (429). Retrying...")
                 response.raise_for_status()
@@ -266,14 +276,17 @@ class FortiGateClient:
 
         try:
             logger.info(f"Sending POST request to {url} (params: {req_params}, verify: {verify_path})")
-            response = requests.post(
-                url,
-                headers=self.headers,
-                params=req_params,
-                json=json_data,
-                verify=verify_path,
-                timeout=10
-            )
+            with warnings.catch_warnings():
+                if verify_path is False:
+                    warnings.simplefilter("ignore", urllib3.exceptions.InsecureRequestWarning)
+                response = requests.post(
+                    url,
+                    headers=self.headers,
+                    params=req_params,
+                    json=json_data,
+                    verify=verify_path,
+                    timeout=10
+                )
             if response.status_code == 429:
                 logger.warning("API rate limit hit (429). Retrying...")
                 response.raise_for_status()
