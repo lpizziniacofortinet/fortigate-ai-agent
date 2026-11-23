@@ -8,6 +8,7 @@ from core.context import InvestigationContext
 from core.llm_provider import BaseLLMProvider, ModelConfig, ModelRegistry
 from core.policy_engine import DeterministicPolicyEngine, PolicyDecision, PolicyViolationError
 from core.schemas import AgentRole, utc_now_iso
+from core.verification import PostChangeVerifier, VerificationResult, VerificationStatus
 from tools.registry import ToolCapability, ToolCatalog
 from write_authorization import ApprovalToken, ChangeProposal
 
@@ -23,6 +24,7 @@ class RemediationExecutionRecord:
     executed: bool = False
     dry_run: bool = False
     execution_result: Dict[str, Any] = field(default_factory=dict)
+    post_change_status: Optional[str] = None
     post_change_verified: Optional[bool] = None
     post_change_evidence: Dict[str, Any] = field(default_factory=dict)
     rollback_guidance: str = ""
@@ -50,6 +52,7 @@ class RemediationAgent(BaseAgent):
         self,
         provider: BaseLLMProvider,
         policy_engine: Optional[DeterministicPolicyEngine] = None,
+        verifier: Optional[PostChangeVerifier] = None,
         model_config: Optional[ModelConfig] = None,
         model_registry: Optional[ModelRegistry] = None,
         tool_catalog: Optional[ToolCatalog] = None,
@@ -61,6 +64,7 @@ class RemediationAgent(BaseAgent):
             tool_catalog=tool_catalog,
         )
         self.policy_engine = policy_engine or DeterministicPolicyEngine()
+        self.verifier = verifier or PostChangeVerifier()
 
     def build_system_instruction(self, context: InvestigationContext) -> str:
         return (
@@ -128,34 +132,9 @@ class RemediationAgent(BaseAgent):
         self,
         proposal: ChangeProposal,
         context: InvestigationContext,
-    ) -> Tuple[bool, Dict[str, Any]]:
-        """Performs read-after-write verification against the FortiGate client."""
-        client = context.fg_client
-        action = proposal.action
-        params = proposal.parameters
-
-        try:
-            if action == "toggle_interface":
-                intfs = client.get_interfaces()
-                return True, {"source": "get_interfaces", "status": intfs.get("status")}
-            if action in ("toggle_firewall_policy", "apply_policy_hardening"):
-                pols = client.get_firewall_policies()
-                return True, {"source": "get_firewall_policies", "status": pols.get("status")}
-            if action == "add_static_route":
-                routes = client.get_routing_table()
-                return True, {"source": "get_routing_table", "status": routes.get("status")}
-            if action == "reset_vpn_tunnel":
-                vpn = client.get_vpn_status()
-                return True, {"source": "get_vpn_status", "status": vpn.get("status")}
-            if action == "quarantine_ip_address":
-                banned = client.get_quarantined_ips()
-                return True, {"source": "get_quarantined_ips", "status": banned.get("status")}
-            if action == "disconnect_ssl_vpn_user":
-                vpn = client.get_vpn_status()
-                return True, {"source": "get_vpn_status", "status": vpn.get("status")}
-            return False, {"reason": f"No post-change verifier for action '{action}'"}
-        except Exception as exc:
-            return False, {"error": str(exc), "parameters": params}
+    ) -> VerificationResult:
+        """Performs action-specific, tri-state read-after-write verification against the FortiGate."""
+        return self.verifier.verify(proposal, context)
 
     def execute_proposal(
         self,
@@ -166,7 +145,7 @@ class RemediationAgent(BaseAgent):
     ) -> RemediationExecutionRecord:
         """
         Executes a validated, explicitly approved ChangeProposal with fail-closed backup
-        and read-after-write post-change verification.
+        and action-specific tri-state post-change verification.
         """
         # 1. Re-validate deterministically before touching authorization or firewall
         decision = self.policy_engine.evaluate(
@@ -204,12 +183,16 @@ class RemediationAgent(BaseAgent):
         exec_res = dispatch[proposal.action](proposal.parameters)
         is_dry_run = exec_res.get("status") == "dry_run"
 
-        # 5. Invalidate shared cache and run post-change verification
+        # 5. Invalidate shared cache and run action-specific tri-state post-change verification
         context.invalidate_cache()
+        post_status: Optional[str] = None
         verified: Optional[bool] = None
         verify_evidence: Dict[str, Any] = {}
         if verify_post_change and not is_dry_run:
-            verified, verify_evidence = self._verify_post_change(proposal, context)
+            vres = self._verify_post_change(proposal, context)
+            post_status = vres.status.value
+            verified = vres.verified
+            verify_evidence = vres.to_dict()
 
         record = RemediationExecutionRecord(
             correlation_id=context.correlation_id,
@@ -220,6 +203,7 @@ class RemediationAgent(BaseAgent):
             executed=not is_dry_run,
             dry_run=is_dry_run,
             execution_result=exec_res,
+            post_change_status=post_status,
             post_change_verified=verified,
             post_change_evidence=verify_evidence,
             rollback_guidance=self._build_rollback_guidance(proposal.action, proposal.target, proposal.parameters),
@@ -230,6 +214,7 @@ class RemediationAgent(BaseAgent):
                 "proposal_id": proposal.proposal_id,
                 "action": proposal.action,
                 "dry_run": is_dry_run,
+                "post_change_status": post_status,
                 "post_change_verified": verified,
             },
         )
