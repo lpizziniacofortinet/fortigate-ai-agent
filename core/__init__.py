@@ -27,6 +27,7 @@ from core.task_manager import BoundedTaskManager
 from core.orchestrator import OrchestratorAgent
 from core.policy_engine import DeterministicPolicyEngine, PolicyDecision, PolicyViolationError
 from core.topology import NetworkTopologyGraph, TopologyNode, TopologyEdge
+from core.verification import PostChangeVerifier, VerificationResult, VerificationStatus
 
 __all__ = [
     "AgentRole",
@@ -56,4 +57,7 @@ __all__ = [
     "NetworkTopologyGraph",
     "TopologyNode",
     "TopologyEdge",
+    "PostChangeVerifier",
+    "VerificationResult",
+    "VerificationStatus",
 ]
