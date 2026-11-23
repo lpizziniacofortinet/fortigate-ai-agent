@@ -161,7 +161,7 @@ BACKUP_BEFORE_WRITE=True
 | `MOCK_MODE` | Boolean | `Auto` | If `True` or if IP/Token are omitted, runs offline mock simulation. |
 | `ENABLE_WRITE_ACTIONS` | Boolean | `False` | If `True`, enables active configuration modifications (VPN reset, interface toggle, static routes, policy changes). |
 | `DRY_RUN` | Boolean | `False` | If `True`, simulates write actions and displays proposed parameters without applying changes. |
-| `BACKUP_BEFORE_WRITE` | Boolean | `True` | If `True`, automatically takes a `.conf` backup snapshot before applying write actions. |
+| `BACKUP_BEFORE_WRITE` | Boolean | `True` | Fail-closed pre-change safety control: takes and verifies a `.conf` backup before writes, aborting the write if backup fails. Set `False` only to explicitly bypass. |
 | `OUTPUT_FILE` | String | `""` | File path to export diagnostic reports (`.html`, `.md`, or `.json`). |
 
 ---
