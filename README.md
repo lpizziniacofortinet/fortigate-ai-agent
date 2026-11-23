@@ -14,6 +14,146 @@ It also features a high-fidelity **Mock Mode** for offline testing and demonstra
 
 ---
 
+## Multi-Agent Operations Architecture
+
+`fortigate-ai-agent` is evolving into a coordinated **multi-agent FortiGate Network Operations & Security platform** (Issue #16). Instead of a single unconstrained LLM calling arbitrary APIs, specialist agents operate with **least-privilege, read-only tool scopes**, exchange **typed Pydantic evidence contracts**, and share a per-investigation telemetry cache, while all write actions remain strictly isolated behind a deterministic security control plane.
+
+![FortiGate AI Agent — Multi-Agent Operations Architecture](docs/images/multi_agent_architecture.jpg)
+
+### System Flow & Capability Isolation
+
+```mermaid
+flowchart TD
+    User["Operator / CLI / CI Pipeline"] --> Orch["Orchestrator Agent<br/>(gemini-4-carbon | Read-Only)"]
+
+    Orch -->|"Bounded Parallel Dispatch"| Net["Network Agent<br/>(gemini-4-neon | NETWORK_READ)"]
+    Orch -->|"Bounded Parallel Dispatch"| Sec["Security Agent<br/>(gemini-4-neon | SECURITY_READ)"]
+    Orch -->|"Bounded Parallel Dispatch"| Thr["Threat Agent<br/>(gemini-4-neon | THREAT_READ)"]
+    Orch -->|"Bounded Parallel Dispatch"| Hlt["Health Agent<br/>(gemini-4-neon | HEALTH_READ)"]
+
+    Net & Sec & Thr & Hlt -->|"Typed AgentResult + EvidenceItem"| Orch
+    Net & Sec & Thr & Hlt --> Ctx["InvestigationContext<br/>Correlation ID | Telemetry Cache | Untrusted Evidence Wrapper"]
+
+    Orch -.->|"Approved Findings Only"| Rem["Remediation Agent<br/>(gemini-4-carbon | Write-Gated)"]
+    Rem --> Auth["WriteAuthorizationController<br/>SHA-256 ChangeProposal + Single-Use ApprovalToken"]
+    Auth --> Backup["Fail-Closed Pre-Change Backup<br/>Raw .conf Download & Verification"]
+    Backup --> Ctx
+
+    Ctx --> Client["FortiGateClient<br/>TLS Verified by Default | URL Path Escaping"]
+    Client --> FGT["FortiGate Firewall<br/>FortiOS REST API v2 (HTTPS)"]
+```
+
+### Structured Agent Contracts (Phase 1 Foundation)
+
+All specialist agents communicate via validated Pydantic schemas in `core/schemas.py`, ensuring evidence provenance, explicit `unknown` / `unavailable` / `not_applicable` states, and reproducible model provenance:
+
+```mermaid
+classDiagram
+    class InvestigationTask {
+        +str task_id
+        +str correlation_id
+        +str objective
+        +AgentRole target_role
+        +str device
+        +str vdom
+        +float timeout_seconds
+    }
+    class AgentResult {
+        +str agent_name
+        +AgentRole agent_role
+        +str task_id
+        +str correlation_id
+        +str status
+        +str summary
+        +List~AgentFinding~ findings
+        +List~str~ unknowns
+        +List~str~ errors
+        +ModelProvenance model_provenance
+    }
+    class AgentFinding {
+        +str category
+        +FindingSeverity severity
+        +FindingStatus status
+        +ConfidenceLevel confidence
+        +str summary
+        +List~EvidenceItem~ evidence
+        +List~str~ affected_objects
+        +bool remediation_required
+    }
+    class EvidenceItem {
+        +str source_api
+        +str timestamp
+        +str device
+        +str vdom
+        +str summary
+        +Dict values
+        +bool untrusted
+    }
+    class ModelProvenance {
+        +str provider
+        +str model_id
+        +AgentRole role
+        +float latency_ms
+        +Dict token_usage
+    }
+
+    InvestigationTask --> AgentResult : produces
+    AgentResult *-- AgentFinding : contains
+    AgentResult *-- ModelProvenance : records
+    AgentFinding *-- EvidenceItem : backed by
+```
+
+---
+
+## Zero-Trust Security Control Plane
+
+Every telemetry read and configuration write passes through deterministic security controls enforced **outside the LLM**:
+
+![Zero-Trust Security & Safe Remediation Pipeline](docs/images/security_control_plane.jpg)
+
+| Control Layer | Implementation | Protection |
+| :--- | :--- | :--- |
+| **1. Untrusted Telemetry Defense** | `wrap_untrusted_tool_output()` in `agent.py` | Wraps all FortiGate logs, policy names, comments, and descriptions in explicit `<<<BEGIN_UNTRUSTED_FORTIGATE_EVIDENCE>>>` delimiters and neutralizes boundary spoofing to block indirect prompt injection. |
+| **2. Least-Privilege ToolCatalog** | `tools/registry.py` + `core/agent_base.py` | Diagnostic specialists and the Orchestrator are structurally forbidden from binding `REMEDIATION_WRITE` tools. URL path parameters are validated and percent-encoded against path traversal. |
+| **3. Proposal-Bound Approval** | `write_authorization.py` | Centralizes write authorization with SHA-256 `ChangeProposal` digests and single-use, expiring `ApprovalToken`s. Non-interactive (JSON/CI/cron) writes are **denied by default** without an exact approval token. |
+| **4. Fail-Closed Pre-Change Backup** | `FortiGateClient._execute_write_prechecks()` | Downloads raw plain-text `.conf` from `/monitor/system/config/backup` and verifies the file exists, is non-empty, and is valid before any write. Any backup failure aborts the write with `BackupRequiredError`. |
+| **5. Verified TLS & XSS-Hardened Reports** | `config.py`, `fortigate_client.py`, `main.py` | Enables `VERIFY_SSL=True` by default (supports custom `CA_BUNDLE`; explicit `--insecure` emits prominent warning). HTML report exports escape all untrusted fields and pin `marked@12.0.2` + `dompurify@3.0.9` with SHA-384 SRI hashes. |
+
+### Safe Write & Fail-Closed Backup Sequence
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Op as Operator / CI
+    participant Rem as Remediation Tool
+    participant Auth as WriteAuthorizationController
+    participant Client as FortiGateClient
+    participant FGT as FortiGate (HTTPS TLS)
+
+    Rem->>Auth: create_proposal(action, target, vdom, params)
+    Auth-->>Auth: Compute SHA-256 digest & TTL
+    alt Non-Interactive (JSON / CI / Cron)
+        Op->>Auth: Supply single-use ApprovalToken
+        Auth-->>Auth: Verify digest match, TTL, non-replay
+    else Interactive TTY
+        Auth->>Op: Display ChangeProposal & confirm (y/N)
+    end
+    Note over Auth: Missing, expired, mismatched, or replayed -> WriteApprovalError (DENIED)
+
+    Rem->>Client: Execute write (e.g. toggle_interface)
+    Client-->>Client: Validate & URL-escape path parameters
+    Client->>FGT: GET /monitor/system/config/backup?scope=global (raw text)
+    FGT-->>Client: Raw FortiOS .conf snapshot
+    Client-->>Client: Verify file exists, non-empty, valid text
+    Note over Client: Any backup failure -> BackupRequiredError (ABORTED)
+
+    Client->>FGT: PUT / POST FortiOS REST API (TLS Verified)
+    FGT-->>Client: 200 OK
+    Client-->>Rem: Result + invalidate InvestigationContext cache
+```
+
+---
+
 ## Architecture & Endpoints Used
 
 The agent communicates with the standard FortiOS REST API (`/api/v2`) and implements automatic fallback endpoints for multi-version compatibility:
@@ -276,9 +416,10 @@ Or via the CLI flag:
 python3 main.py --enable-write
 ```
 
-### 2. Confirmation Prompts
-* **Interactive Terminal Sessions**: Even if write actions are enabled, the agent **always prompts for confirmation** before executing any write/mitigation operation. You will see a warning panel detailing the operation and target parameters and must select `y/N` to proceed.
-* **Scripted/JSON Pipeline Sessions**: If running non-interactively (e.g. `--json`), the agent executes actions without terminal prompting, provided `ENABLE_WRITE_ACTIONS=True`.
+### 2. Proposal-Bound Confirmation & Non-Interactive Safety
+* **Interactive Terminal Sessions**: Even if write actions are enabled, `WriteAuthorizationController` generates a structured `ChangeProposal` (action, target, VDOM, current/proposed state, risk, and SHA-256 digest) and **always prompts for explicit confirmation** before executing any write operation.
+* **Non-Interactive / JSON / CI / Cron Sessions**: Write actions are **denied by default** (`WriteApprovalError`) in non-TTY execution—`ENABLE_WRITE_ACTIONS=True` alone never authorizes a specific change. Automated pipelines must supply an explicit, unexpired, single-use `ApprovalToken` bound to the exact proposal digest.
+* **Fail-Closed Pre-Change Backup**: When `BACKUP_BEFORE_WRITE=True` (default), the client downloads a raw `.conf` snapshot from `/monitor/system/config/backup` and verifies the file exists, is non-empty, and is readable before proceeding. Any backup failure aborts the write with `BackupRequiredError`.
 
 ### 3. FortiOS REST API Permission Handling
 If write actions are enabled in the agent but your FortiGate API token is restricted to a **Read-Only** profile in FortiOS, the firewall returns `403 Forbidden` errors. The AI agent catches these permission errors, reports them clearly, and generates the exact FortiOS CLI commands for manual execution.
@@ -330,46 +471,62 @@ python3 main.py --json --mock | jq .
 
 ## Testing & Quality Assurance
 
-The repository includes a comprehensive unit and integration test suite in `tests/test_agent_reasoning.py`.
+The repository includes an automated unit, security, and multi-agent foundation test suite under `tests/` (`47` deterministic unit tests + gated Gemini integration tests).
 
 ### Running Tests
 ```bash
-# Run all unit and integration tests
-python3 -m unittest discover -s tests
+# Run the full test suite with pytest
+python3 -m pytest -v
 
-# Run specific test file with verbose output
-python3 -m unittest -v tests/test_agent_reasoning.py
+# Or using Python's built-in unittest runner
+python3 -m unittest discover -s tests -v
 ```
 
 ### Test Coverage Highlights
-* **VDOM Injection**: Verifies that `vdom` parameters are automatically appended to all REST API queries.
-* **HTTP 429 Rate Limiting & Retry**: Validates exponential backoff retries using Tenacity when API rate limits are encountered.
-* **Permission Enforcement**: Asserts that write operations throw `PermissionError` when `ENABLE_WRITE_ACTIONS=False`.
-* **Mock Telemetry Validation**: Tests the response structures for SD-WAN SLA metrics, HA cluster sync, VDOM listings, and policy toggles.
-* **AI Dynamic Routing Root-Cause Reasoning**: An integration test that validates Gemini's ability to correlate an inactive BGP peer (`Active` state) with a blocking firewall security policy (denying TCP port 179) and generate correct remediation recommendations.
+* **Phase 1 Multi-Agent Foundation (`tests/test_phase1_foundation.py`)**: Validates Pydantic contracts, least-privilege `ToolCatalog` scoping, shared per-investigation telemetry caching, flagship `ModelRegistry` defaults, provider error fallbacks, and async timeouts.
+* **Write Authorization (`tests/test_write_authorization.py`)**: Verifies centralized proposal-bound approvals, non-TTY default denial, TTL expiration, replay prevention, and parameter mismatch rejection.
+* **Fail-Closed Backups (`tests/test_backup_fail_closed.py`)**: Tests live plain-text `.conf` backup handling, API/filesystem/empty/corrupt backup aborts, and API token redaction.
+* **TLS Verification Defaults (`tests/test_security_tls.py`)**: Asserts `VERIFY_SSL=True` by default, custom CA bundle handling, fast-fail `TLSVerificationError`, and prominent insecure opt-out warnings.
+* **Prompt-Injection Defense (`tests/test_prompt_injection.py`)**: Tests adversarial payloads in logs, policy names, comments, and interface descriptions against untrusted-evidence delimiting.
+* **URL Path Escaping (`tests/test_url_escaping.py`)**: Blocks path traversal (`../`), query injection (`?vdom=`), and non-integer policy IDs.
+* **HTML Export XSS Hardening (`tests/test_html_export.py`)**: Verifies HTML/JSON escaping and pinned SHA-384 SRI CDN scripts.
+* **Security Audit & Client Core (`tests/test_security_audit.py`, `tests/test_agent_reasoning.py`, `tests/test_model_config.py`)**: Covers CIS security auditing, policy shadowing, VDOM injection, rate-limit retries, and Gemini 4 model defaults.
 
 ---
 
 ## Project Structure
 
-```
+```text
 .
-├── agent.py                 # Gemini AI agent integration, tool definitions, and reasoning loops
-├── config.py                # Centralized configuration loader and status printer
-├── fortigate_client.py      # FortiOS REST API client, tenacity retries, and mock engine
-├── main.py                  # CLI driver, argument parser, TUI banner, and interactive loop
-├── security_audit.py        # FortiOS Security Posture & CIS Hardening Benchmark Engine
-├── requirements.txt         # Python package dependencies
-├── .env.template            # Environment variables configuration template
-├── .env                     # Local environment configuration (git-ignored)
-├── Dockerfile               # Production container image definition
-├── docker-compose.yml       # Docker Compose service orchestration
-├── fortigate-ai-agent.1     # Linux manual page (man page)
-├── fortigate_agent.log      # Persistent audit log file
-├── tests/
-│   ├── test_agent_reasoning.py  # Unit tests and multi-step reasoning integration tests
-│   └── test_security_audit.py   # Security Posture & CIS Hardening Benchmark tests
-└── LICENSE                  # MIT License
+├── core/
+│   ├── agent_base.py            # BaseAgent with least-privilege enforcement & async timeouts
+│   ├── context.py               # InvestigationContext (correlation IDs & shared telemetry cache)
+│   ├── llm_provider.py          # Provider abstraction (Gemini/Mock) & flagship ModelRegistry
+│   └── schemas.py               # Shared Pydantic contracts (AgentResult, AgentFinding, EvidenceItem)
+├── tools/
+│   ├── registry.py              # Capability-based ToolCatalog with role isolation
+│   ├── network_tools.py         # Read-only Network domain tools
+│   ├── security_tools.py        # Read-only Security & audit tools
+│   ├── threat_tools.py          # Read-only Threat, log, and session tools
+│   ├── health_tools.py          # Read-only System/HA health tools
+│   └── remediation_tools.py     # Approval-gated write & backup tools
+├── docs/
+│   └── images/
+│       ├── multi_agent_architecture.jpg  # Multi-Agent Operations Architecture diagram
+│       └── security_control_plane.jpg    # Zero-Trust Security & Safe Remediation Pipeline diagram
+├── write_authorization.py       # Centralized ChangeProposal & single-use ApprovalToken controller
+├── agent.py                     # Gemini AI agent integration, untrusted-evidence wrapping & tools
+├── config.py                    # Centralized configuration loader (TLS-verified & Gemini 4 defaults)
+├── fortigate_client.py          # FortiOS REST API client, fail-closed backups, TLS & path validation
+├── main.py                      # CLI driver, TUI menu, and XSS-hardened HTML/JSON/MD report export
+├── security_audit.py            # FortiOS Security Posture & CIS Hardening Benchmark Engine
+├── requirements.txt             # Python package dependencies
+├── .env.template                # Environment variables configuration template
+├── Dockerfile                   # Production container image definition
+├── docker-compose.yml           # Docker Compose service orchestration
+├── fortigate-ai-agent.1         # Linux manual page (man page)
+├── tests/                       # Comprehensive unit, security, and multi-agent test suites
+└── LICENSE                      # MIT License
 ```
 
 ---
