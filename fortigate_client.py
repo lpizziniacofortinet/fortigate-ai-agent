@@ -1,6 +1,7 @@
 import os
 import logging
 import warnings
+from urllib.parse import quote
 import requests
 from datetime import datetime
 from typing import Dict, Any, List, Optional
@@ -640,6 +641,33 @@ class FortiGateClient:
             sanitized = sanitized.replace(self.token, "[REDACTED]")
         return sanitized
 
+    @staticmethod
+    def _validate_path_segment(value: str, param_name: str) -> str:
+        """
+        Validates and URL-encodes a single FortiOS REST API path segment.
+        Rejects empty values, path traversal ('..', '/', '\\'), query/fragment delimiters ('?', '#'),
+        and control characters.
+        """
+        if not isinstance(value, str):
+            raise ValueError(f"{param_name} must be a non-empty string.")
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError(f"{param_name} must not be empty.")
+        if any(ord(ch) < 32 or ord(ch) == 127 for ch in cleaned):
+            raise ValueError(f"{param_name} contains illegal control characters.")
+        if cleaned in (".", "..") or ".." in cleaned or "/" in cleaned or "\\" in cleaned:
+            raise ValueError(f"{param_name} contains illegal path traversal characters: '{cleaned}'")
+        if "?" in cleaned or "#" in cleaned or "%" in cleaned:
+            raise ValueError(f"{param_name} contains illegal URL delimiter characters: '{cleaned}'")
+        return quote(cleaned, safe="")
+
+    @staticmethod
+    def _validate_positive_int(value: int, param_name: str) -> int:
+        """Strictly validates that a numeric FortiOS object ID is a positive integer."""
+        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+            raise ValueError(f"{param_name} must be a positive integer.")
+        return value
+
     def _verify_backup_artifact(self, file_path: Optional[str]) -> int:
         """
         Verifies that a configuration backup file exists, is non-empty,
@@ -790,21 +818,23 @@ class FortiGateClient:
         """
         Toggles the administrative state of a network interface (up or down).
         """
+        encoded_intf = self._validate_path_segment(interface_name, "interface_name")
+        clean_intf = interface_name.strip()
         status = status.strip().lower()
         if status not in ("up", "down"):
             raise ValueError("Status parameter must be 'up' or 'down'.")
 
-        precheck = self._execute_write_prechecks("toggle_interface", {"interface_name": interface_name, "status": status})
+        precheck = self._execute_write_prechecks("toggle_interface", {"interface_name": clean_intf, "status": status})
         if precheck:
             return precheck
 
         if self.mock:
             return {
                 "status": "success",
-                "message": f"[Mock Mode] Successfully set interface '{interface_name}' status to '{status}'."
+                "message": f"[Mock Mode] Successfully set interface '{clean_intf}' status to '{status}'."
             }
         
-        return self._put(f"/cmdb/system/interface/{interface_name}", json_data={"status": status})
+        return self._put(f"/cmdb/system/interface/{encoded_intf}", json_data={"status": status})
 
     def add_static_route(self, destination: str, gateway: str, interface: str) -> Dict[str, Any]:
         """
@@ -1025,35 +1055,37 @@ class FortiGateClient:
         """
         Toggles the administrative state of a firewall policy ('enable' or 'disable').
         """
+        valid_policy_id = self._validate_positive_int(policy_id, "policy_id")
         status = status.strip().lower()
         if status not in ("enable", "disable"):
             raise ValueError("Status parameter must be 'enable' or 'disable'.")
 
-        precheck = self._execute_write_prechecks("toggle_firewall_policy", {"policy_id": policy_id, "status": status})
+        precheck = self._execute_write_prechecks("toggle_firewall_policy", {"policy_id": valid_policy_id, "status": status})
         if precheck:
             return precheck
 
         if self.mock:
             return {
                 "status": "success",
-                "message": f"[Mock Mode] Successfully set firewall policy ID '{policy_id}' status to '{status}'."
+                "message": f"[Mock Mode] Successfully set firewall policy ID '{valid_policy_id}' status to '{status}'."
             }
 
-        return self._put(f"/cmdb/firewall/policy/{policy_id}", json_data={"status": status})
+        return self._put(f"/cmdb/firewall/policy/{valid_policy_id}", json_data={"status": status})
 
     def apply_policy_hardening(self, policy_id: int, utm_profiles: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
         """
         Applies UTM security profiles (AV, IPS, WebFilter, SSL-SSH inspection) and full logging
         to a specific firewall policy via the REST CMDB API.
         """
-        precheck = self._execute_write_prechecks("apply_policy_hardening", {"policy_id": policy_id})
+        valid_policy_id = self._validate_positive_int(policy_id, "policy_id")
+        precheck = self._execute_write_prechecks("apply_policy_hardening", {"policy_id": valid_policy_id})
         if precheck:
             return precheck
 
         if self.mock:
             return {
                 "status": "success",
-                "message": f"[Mock Mode] Successfully applied UTM hardening to firewall policy ID {policy_id}."
+                "message": f"[Mock Mode] Successfully applied UTM hardening to firewall policy ID {valid_policy_id}."
             }
 
         # Discover available profile names on the unit dynamically
@@ -1101,8 +1133,8 @@ class FortiGateClient:
         if ssl_ssh_profile:
             payload["ssl-ssh-profile"] = ssl_ssh_profile
 
-        logger.info(f"Applying hardening to firewall policy {policy_id}: {payload}")
-        return self._put(f"/cmdb/firewall/policy/{policy_id}", json_data=payload)
+        logger.info(f"Applying hardening to firewall policy {valid_policy_id}: {payload}")
+        return self._put(f"/cmdb/firewall/policy/{valid_policy_id}", json_data=payload)
 
     def disconnect_ssl_vpn_user(self, username: str) -> Dict[str, Any]:
         """
