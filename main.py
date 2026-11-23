@@ -631,7 +631,13 @@ def parse_args():
     parser.add_argument(
         "--verify-ssl", "-k",
         action="store_true",
-        help="Enable HTTPS certificate verification."
+        help="Enable HTTPS certificate verification (enabled by default)."
+    )
+    parser.add_argument(
+        "--insecure", "--no-verify-ssl",
+        dest="insecure",
+        action="store_true",
+        help="Explicitly disable HTTPS TLS certificate verification (lab troubleshooting only; emits a security warning)."
     )
     parser.add_argument(
         "--ca-bundle", "-c",
@@ -665,6 +671,8 @@ def main():
         Config.FORTIGATE_VDOM = args.vdom
     if args.verify_ssl:
         Config.VERIFY_SSL = True
+    if getattr(args, "insecure", False):
+        Config.VERIFY_SSL = False
     if args.ca_bundle:
         Config.CA_BUNDLE = args.ca_bundle
         Config.VERIFY_SSL = True
@@ -688,6 +696,14 @@ def main():
     else:
         display_welcome_banner()
         Config.print_status()
+        if not Config.MOCK_MODE and Config.USE_SSL and not Config.VERIFY_SSL and not Config.CA_BUNDLE:
+            console.print(Panel(
+                "[bold red]WARNING: TLS certificate verification is DISABLED (--insecure / VERIFY_SSL=False).[/bold red]\n"
+                "Management-plane HTTPS traffic and API credentials are vulnerable to interception.\n"
+                "For private PKI, configure [cyan]CA_BUNDLE[/cyan] or pass [cyan]--ca-bundle <path>[/cyan] instead.",
+                title="⚠️ Insecure TLS Configuration",
+                border_style="red"
+            ))
         if "2.5" in Config.GEMINI_MODEL or "flash" in Config.GEMINI_MODEL.lower():
             console.print(Panel(
                 f"[yellow]Current Model ({Config.GEMINI_MODEL}):[/yellow]\n"

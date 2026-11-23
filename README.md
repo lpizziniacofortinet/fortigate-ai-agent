@@ -129,7 +129,7 @@ FORTIGATE_TOKEN=your_fortigate_api_token_here
 FORTIGATE_PORT=443
 FORTIGATE_VDOM=root
 USE_SSL=True
-VERIFY_SSL=False
+VERIFY_SSL=True
 CA_BUNDLE=
 
 # Set to True to force offline mock simulation
@@ -156,7 +156,7 @@ BACKUP_BEFORE_WRITE=True
 | `FORTIGATE_PORT` | Integer | `443` | Target API connection port. |
 | `FORTIGATE_VDOM` | String | `root` | Target Virtual Domain (VDOM) for API queries. |
 | `USE_SSL` | Boolean | `True` | Whether to connect via HTTPS (`True`) or HTTP (`False`). |
-| `VERIFY_SSL` | Boolean | `False` | Whether to verify HTTPS SSL certificates. |
+| `VERIFY_SSL` | Boolean | `True` | Whether to verify HTTPS SSL certificates (enabled by default; set `False` only for lab troubleshooting). |
 | `CA_BUNDLE` | String | `""` | File path to a custom CA certificate bundle (.pem). Enables SSL verification. |
 | `MOCK_MODE` | Boolean | `Auto` | If `True` or if IP/Token are omitted, runs offline mock simulation. |
 | `ENABLE_WRITE_ACTIONS` | Boolean | `False` | If `True`, enables active configuration modifications (VPN reset, interface toggle, static routes, policy changes). |
@@ -241,7 +241,8 @@ python3 main.py agentic
 | `--token` | `-t` | Override the FortiGate REST API Access Token. |
 | `--port` | `-p` | Override the target connection port (default: `443`). |
 | `--vdom` | `-v` | Override target Virtual Domain (default: `"root"`). |
-| `--verify-ssl` | `-k` | Enable HTTPS certificate verification. |
+| `--verify-ssl` | `-k` | Enable HTTPS certificate verification (default). |
+| `--insecure` | _None_ | Explicitly disable HTTPS TLS certificate verification (lab troubleshooting only; emits warning). |
 | `--ca-bundle` | `-c` | Path to custom CA certificate bundle file (enables certificate verification). |
 | `--model` | _None_ | Override Gemini model (e.g. `gemini-2.5-flash`, `gemini-2.5-pro`, `gemini-3.5-flash`, `gemini-pro-latest`). |
 | `--help` | `-h` | Show CLI help message and exit. |

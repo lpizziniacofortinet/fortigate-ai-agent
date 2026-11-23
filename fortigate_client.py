@@ -1,15 +1,18 @@
 import os
 import logging
-import urllib3
+import warnings
 import requests
 from datetime import datetime
 from typing import Dict, Any, List, Optional
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
-# Suppress insecure request warnings for self-signed certificates (common in local setups)
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-
 logger = logging.getLogger("FortiGateClient")
+
+
+class TLSVerificationError(RuntimeError):
+    """Raised when HTTPS TLS certificate verification fails against the FortiGate."""
+    pass
+
 
 class FortiGateClient:
     """
@@ -23,7 +26,7 @@ class FortiGateClient:
         token: str,
         port: int = 443,
         use_ssl: bool = True,
-        verify_ssl: bool = False,
+        verify_ssl: bool = True,
         vdom: str = "root",
         ca_bundle: str = "",
         enable_write_actions: bool = False,
@@ -43,6 +46,15 @@ class FortiGateClient:
         self.backup_before_write = backup_before_write
         self.mock = mock
 
+        if not self.mock and self.use_ssl and not self.ca_bundle and not self.verify_ssl:
+            msg = (
+                f"INSECURE TLS WARNING: Certificate verification is disabled for FortiGate {self.host}:{self.port}. "
+                "API credentials and management traffic may be vulnerable to interception. "
+                "Configure CA_BUNDLE (--ca-bundle) for private PKI instead of disabling verification."
+            )
+            logger.warning(msg)
+            warnings.warn(msg, UserWarning, stacklevel=2)
+
         # Set up base URL
         protocol = "https" if use_ssl else "http"
         self.base_url = f"{protocol}://{self.host}:{self.port}/api/v2"
@@ -53,6 +65,24 @@ class FortiGateClient:
             "Content-Type": "application/json",
             "Accept": "application/json"
         }
+
+    def _resolve_ssl_verify(self):
+        """Returns the requests `verify` argument (CA bundle path or boolean)."""
+        if self.use_ssl and self.ca_bundle:
+            if not os.path.isfile(self.ca_bundle):
+                raise TLSVerificationError(
+                    f"Configured CA bundle file does not exist or is not readable: '{self.ca_bundle}'."
+                )
+            return self.ca_bundle
+        return self.verify_ssl
+
+    def _raise_tls_error(self, url: str, exc: requests.exceptions.SSLError) -> None:
+        logger.error(f"TLS certificate verification failed for {url}: {exc}")
+        raise TLSVerificationError(
+            f"TLS certificate verification failed for FortiGate at {self.host}:{self.port} ({exc}). "
+            "Provide a trusted CA certificate with CA_BUNDLE / --ca-bundle for private PKI, "
+            "or explicitly opt out for lab troubleshooting with VERIFY_SSL=False / --insecure."
+        ) from exc
 
     @retry(
         stop=stop_after_attempt(3),
@@ -73,9 +103,7 @@ class FortiGateClient:
             req_params["vdom"] = self.vdom
 
         # Determine SSL verification path (CA Bundle or boolean)
-        verify_path = self.verify_ssl
-        if self.use_ssl and self.ca_bundle:
-            verify_path = self.ca_bundle
+        verify_path = self._resolve_ssl_verify()
 
         try:
             logger.info(f"Sending GET request to {url} (params: {req_params}, verify: {verify_path})")
@@ -93,6 +121,8 @@ class FortiGateClient:
                 
             response.raise_for_status()
             return response.json()
+        except requests.exceptions.SSLError as e:
+            self._raise_tls_error(url, e)
         except requests.exceptions.RequestException as e:
             logger.error(f"Error calling endpoint {url}: {e}")
             raise ConnectionError(f"Failed to communicate with FortiGate at {self.host}: {e}")
@@ -118,9 +148,7 @@ class FortiGateClient:
         if self.vdom and "vdom" not in req_params:
             req_params["vdom"] = self.vdom
 
-        verify_path = self.verify_ssl
-        if self.use_ssl and self.ca_bundle:
-            verify_path = self.ca_bundle
+        verify_path = self._resolve_ssl_verify()
 
         try:
             logger.info(f"Sending PUT request to {url} (params: {req_params}, verify: {verify_path})")
@@ -138,6 +166,8 @@ class FortiGateClient:
                 
             response.raise_for_status()
             return response.json()
+        except requests.exceptions.SSLError as e:
+            self._raise_tls_error(url, e)
         except requests.exceptions.RequestException as e:
             logger.error(f"Error calling endpoint {url}: {e}")
             raise ConnectionError(f"Failed to modify FortiGate configuration at {self.host}: {e}")
@@ -163,9 +193,7 @@ class FortiGateClient:
         if self.vdom and "vdom" not in req_params:
             req_params["vdom"] = self.vdom
 
-        verify_path = self.verify_ssl
-        if self.use_ssl and self.ca_bundle:
-            verify_path = self.ca_bundle
+        verify_path = self._resolve_ssl_verify()
 
         try:
             logger.info(f"Sending POST request to {url} (params: {req_params}, verify: {verify_path})")
@@ -183,6 +211,8 @@ class FortiGateClient:
                 
             response.raise_for_status()
             return response.json()
+        except requests.exceptions.SSLError as e:
+            self._raise_tls_error(url, e)
         except requests.exceptions.RequestException as e:
             logger.error(f"Error calling endpoint {url}: {e}")
             raise ConnectionError(f"Failed to execute action on FortiGate at {self.host}: {e}")
