@@ -55,8 +55,15 @@ def _extract_list_results(resp: Any) -> Optional[List[Dict[str, Any]]]:
 
 
 def _normalize_cidr(value: str) -> Optional[str]:
+    """Normalizes both CIDR ('10.50.0.0/16') and FortiOS CMDB ('10.50.0.0 255.255.0.0') strings."""
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    parts = raw.split()
+    if len(parts) == 2:
+        raw = f"{parts[0]}/{parts[1]}"
     try:
-        return str(ipaddress.ip_network(str(value).strip(), strict=False))
+        return str(ipaddress.ip_network(raw, strict=False))
     except ValueError:
         return None
 
@@ -127,10 +134,10 @@ class PostChangeVerifier:
     def _verify_toggle_interface(self, proposal: ChangeProposal, context: InvestigationContext) -> VerificationResult:
         intf_name = str(proposal.parameters.get("interface_name", proposal.target)).strip()
         desired_status = str(proposal.parameters.get("status", "")).strip().lower()
-        desired = {"interface_name": intf_name, "status": desired_status}
-        source = "get_interfaces (/monitor/system/interface)"
+        desired = {"interface_name": intf_name, "admin_status": desired_status}
+        source = f"get_interface_config (/cmdb/system/interface/{intf_name})"
 
-        resp = context.fg_client.get_interfaces()
+        resp = context.fg_client.get_interface_config(intf_name)
         items = _extract_list_results(resp)
         if items is None:
             return VerificationResult(
@@ -138,14 +145,14 @@ class PostChangeVerifier:
                 target=intf_name,
                 vdom=proposal.vdom,
                 desired_state=desired,
-                observed_state={"raw_type": type(resp).__name__},
+                observed_state={"raw_type": type(resp).__name__, "response_status": resp.get("status") if isinstance(resp, dict) else None},
                 evidence_source=source,
-                reason="Interface response shape is unsupported or unparseable.",
+                reason="CMDB interface response shape is unsupported or unparseable.",
             )
 
         matches = [
             i for i in items
-            if str(i.get("name") or i.get("id") or "").strip().lower() == intf_name.lower()
+            if str(i.get("name") or i.get("q_origin_key") or "").strip().lower() == intf_name.lower()
         ]
         if len(matches) == 0:
             return VerificationResult(
@@ -155,7 +162,7 @@ class PostChangeVerifier:
                 desired_state=desired,
                 observed_state={"found": False},
                 evidence_source=source,
-                reason=f"Target interface '{intf_name}' not found in VDOM '{proposal.vdom}'.",
+                reason=f"Target interface '{intf_name}' not found in CMDB for VDOM '{proposal.vdom}'.",
             )
         if len(matches) > 1:
             return VerificationResult(
@@ -165,23 +172,39 @@ class PostChangeVerifier:
                 desired_state=desired,
                 observed_state={"match_count": len(matches)},
                 evidence_source=source,
-                reason=f"Ambiguous interface match: found {len(matches)} entries for '{intf_name}'.",
+                reason=f"Ambiguous CMDB interface match: found {len(matches)} entries for '{intf_name}'.",
             )
 
         obj = matches[0]
-        raw_status = obj.get("status")
-        link = obj.get("link")
-        link_status = obj.get("link_status")
-        observed_status: Optional[str] = None
-        if isinstance(raw_status, str) and raw_status.strip().lower() in ("up", "down"):
-            observed_status = raw_status.strip().lower()
-        elif isinstance(link, bool):
-            observed_status = "up" if link else "down"
-        elif link_status in (0, 1):
-            observed_status = "up" if link_status == 1 else "down"
+        raw_admin = obj.get("status")
+        admin_status = raw_admin.strip().lower() if isinstance(raw_admin, str) and raw_admin.strip().lower() in ("up", "down") else None
 
-        observed = {"name": intf_name, "status": observed_status, "link": link, "link_status": link_status}
-        if observed_status is None:
+        # Separately observe operational link state from monitor endpoint (informational only; never substitutes for admin state)
+        operational_link: Optional[str] = None
+        try:
+            mon_items = _extract_list_results(context.fg_client.get_interfaces()) or []
+            mon_matches = [
+                m for m in mon_items
+                if str(m.get("name") or m.get("id") or "").strip().lower() == intf_name.lower()
+            ]
+            if len(mon_matches) == 1:
+                m = mon_matches[0]
+                if isinstance(m.get("link"), bool):
+                    operational_link = "up" if m["link"] else "down"
+                elif m.get("link_status") in (0, 1):
+                    operational_link = "up" if m["link_status"] == 1 else "down"
+                elif isinstance(m.get("status"), str) and m["status"].lower() in ("up", "down"):
+                    operational_link = m["status"].lower()
+        except Exception:
+            operational_link = None
+
+        observed = {
+            "name": intf_name,
+            "admin_status": admin_status,
+            "operational_link_status": operational_link,
+            "vdom": obj.get("vdom", proposal.vdom),
+        }
+        if admin_status is None:
             return VerificationResult(
                 status=VerificationStatus.UNKNOWN,
                 target=intf_name,
@@ -189,9 +212,9 @@ class PostChangeVerifier:
                 desired_state=desired,
                 observed_state=observed,
                 evidence_source=source,
-                reason=f"Interface '{intf_name}' returned incomplete state fields.",
+                reason=f"CMDB interface '{intf_name}' is missing a valid administrative 'status' field.",
             )
-        if observed_status == desired_status:
+        if admin_status == desired_status:
             return VerificationResult(
                 status=VerificationStatus.VERIFIED,
                 target=intf_name,
@@ -199,7 +222,10 @@ class PostChangeVerifier:
                 desired_state=desired,
                 observed_state=observed,
                 evidence_source=source,
-                reason=f"Interface '{intf_name}' confirmed in desired state '{desired_status}'.",
+                reason=(
+                    f"Interface '{intf_name}' CMDB administrative status confirmed '{desired_status}' "
+                    f"(operational link: {operational_link or 'unknown'})."
+                ),
             )
         return VerificationResult(
             status=VerificationStatus.FAILED,
@@ -208,7 +234,7 @@ class PostChangeVerifier:
             desired_state=desired,
             observed_state=observed,
             evidence_source=source,
-            reason=f"Interface '{intf_name}' is '{observed_status}', expected '{desired_status}'.",
+            reason=f"Interface '{intf_name}' CMDB administrative status is '{admin_status}', expected '{desired_status}'.",
         )
 
     def _verify_toggle_firewall_policy(self, proposal: ChangeProposal, context: InvestigationContext) -> VerificationResult:
@@ -364,48 +390,107 @@ class PostChangeVerifier:
         dst = _normalize_cidr(proposal.parameters.get("destination", ""))
         gw = _normalize_ip(proposal.parameters.get("gateway", ""))
         intf = str(proposal.parameters.get("interface", "")).strip().lower()
-        desired = {"destination": dst, "gateway": gw, "interface": intf}
-        source = "get_routing_table (/monitor/router/ipv4)"
+        desired = {"destination": dst, "gateway": gw, "interface": intf, "cmdb_configured": True, "operational_active": True}
+        source = "get_static_routes (/cmdb/router/static) + get_routing_table (/monitor/router/ipv4)"
 
-        resp = context.fg_client.get_routing_table()
-        items = _extract_list_results(resp)
-        if items is None:
+        # 1. Verify exact CMDB static route configuration
+        cmdb_resp = context.fg_client.get_static_routes()
+        cmdb_items = _extract_list_results(cmdb_resp)
+        if cmdb_items is None:
             return VerificationResult(
                 status=VerificationStatus.UNKNOWN,
                 target=str(proposal.target),
                 vdom=proposal.vdom,
                 desired_state=desired,
-                observed_state={"raw_type": type(resp).__name__},
+                observed_state={"cmdb_error": cmdb_resp.get("error") if isinstance(cmdb_resp, dict) else type(cmdb_resp).__name__},
                 evidence_source=source,
-                reason="Routing table response shape is unsupported or unparseable.",
+                reason="CMDB static route response is unavailable or unparseable.",
             )
 
-        matches = []
-        for r in items:
-            r_dst = _normalize_cidr(r.get("destination") or r.get("ip_mask") or "")
+        cmdb_matches = []
+        for r in cmdb_items:
+            r_dst = _normalize_cidr(r.get("dst") or r.get("destination") or "")
             r_gw = _normalize_ip(r.get("gateway") or "")
-            r_intf = str(r.get("interface") or "").strip().lower()
-            if r_dst == dst and r_gw == gw and r_intf == intf:
-                matches.append(r)
+            r_dev = str(r.get("device") or r.get("interface") or "").strip().lower()
+            r_enabled = str(r.get("status", "enable")).strip().lower() == "enable"
+            if r_dst == dst and r_gw == gw and r_dev == intf and r_enabled:
+                cmdb_matches.append(r)
 
-        if len(matches) >= 1:
+        cmdb_configured = len(cmdb_matches) >= 1
+
+        # 2. Separately check operational installation in active IPv4 routing table
+        operational_active: Optional[bool] = None
+        op_match = None
+        op_error: Optional[str] = None
+        try:
+            rt_resp = context.fg_client.get_routing_table()
+            rt_items = _extract_list_results(rt_resp)
+            if rt_items is not None:
+                rt_matches = [
+                    r for r in rt_items
+                    if _normalize_cidr(r.get("destination") or r.get("ip_mask") or "") == dst
+                    and _normalize_ip(r.get("gateway") or "") == gw
+                    and str(r.get("interface") or "").strip().lower() == intf
+                ]
+                operational_active = len(rt_matches) >= 1
+                op_match = rt_matches[0] if rt_matches else None
+            else:
+                op_error = "Routing table response shape unparseable or unavailable"
+        except Exception as exc:
+            op_error = str(exc)
+
+        observed = {
+            "cmdb_configured": cmdb_configured,
+            "cmdb_match": cmdb_matches[0] if cmdb_matches else None,
+            "operational_active": operational_active,
+            "operational_match": op_match,
+            "operational_error": op_error,
+        }
+
+        if not cmdb_configured:
+            return VerificationResult(
+                status=VerificationStatus.FAILED,
+                target=str(proposal.target),
+                vdom=proposal.vdom,
+                desired_state=desired,
+                observed_state=observed,
+                evidence_source=source,
+                reason=f"Static route {dst} via {gw} dev {intf} is NOT configured in CMDB (/cmdb/router/static).",
+            )
+        if operational_active is True:
             return VerificationResult(
                 status=VerificationStatus.VERIFIED,
                 target=str(proposal.target),
                 vdom=proposal.vdom,
                 desired_state=desired,
-                observed_state={"matched_route": matches[0]},
+                observed_state=observed,
                 evidence_source=source,
-                reason=f"Static route {dst} via {gw} dev {intf} confirmed present in active routing table.",
+                reason=f"Static route {dst} via {gw} dev {intf} confirmed in CMDB and installed in active routing table.",
+            )
+        if operational_active is False:
+            return VerificationResult(
+                status=VerificationStatus.FAILED,
+                target=str(proposal.target),
+                vdom=proposal.vdom,
+                desired_state=desired,
+                observed_state=observed,
+                evidence_source=source,
+                reason=(
+                    f"Static route {dst} via {gw} dev {intf} IS configured in CMDB, "
+                    "but is NOT installed in the active operational routing table."
+                ),
             )
         return VerificationResult(
-            status=VerificationStatus.FAILED,
+            status=VerificationStatus.UNKNOWN,
             target=str(proposal.target),
             vdom=proposal.vdom,
             desired_state=desired,
-            observed_state={"route_count": len(items), "matched": False},
+            observed_state=observed,
             evidence_source=source,
-            reason=f"Static route {dst} via {gw} dev {intf} not found in active routing table.",
+            reason=(
+                f"Static route {dst} via {gw} dev {intf} is configured in CMDB, "
+                f"but active routing table verification is unavailable ({op_error})."
+            ),
         )
 
     def _verify_quarantine_ip_address(self, proposal: ChangeProposal, context: InvestigationContext) -> VerificationResult:
@@ -414,6 +499,17 @@ class PostChangeVerifier:
         source = "get_quarantined_ips (/monitor/user/banned)"
 
         resp = context.fg_client.get_quarantined_ips()
+        if isinstance(resp, dict) and resp.get("status") in ("error", "warning"):
+            return VerificationResult(
+                status=VerificationStatus.UNKNOWN,
+                target=str(target_ip or proposal.target),
+                vdom=proposal.vdom,
+                desired_state=desired,
+                observed_state={"response_status": resp.get("status"), "error": resp.get("error") or resp.get("message")},
+                evidence_source=source,
+                reason=f"Quarantine table read failed: {resp.get('error') or resp.get('message') or 'unavailable'}",
+            )
+
         items = _extract_list_results(resp)
         if items is None:
             return VerificationResult(
@@ -559,30 +655,86 @@ class PostChangeVerifier:
             )
 
         t = matches[0]
-        proxyid = t.get("proxyid", [])
-        proxy_up = isinstance(proxyid, list) and any(isinstance(p, dict) and p.get("status") == "up" for p in proxyid)
-        is_up = (
-            str(t.get("status", "")).lower() == "up"
-            or str(t.get("phase1", "")).lower() == "up"
-            or proxy_up
-        )
-        observed = {"name": p1_name, "status": t.get("status"), "phase1": t.get("phase1"), "phase2": t.get("phase2")}
-        if is_up:
+        phase1_raw = t.get("phase1")
+        phase2_raw = t.get("phase2")
+        status_raw = t.get("status")
+        proxyid = t.get("proxyid")
+        expected_selectors = proposal.parameters.get("expected_selectors")
+
+        phase1_state = str(phase1_raw).strip().lower() if isinstance(phase1_raw, str) else None
+        phase2_state = str(phase2_raw).strip().lower() if isinstance(phase2_raw, str) else None
+        tunnel_status = str(status_raw).strip().lower() if isinstance(status_raw, str) else None
+
+        # Evaluate Phase 1 state
+        if phase1_state in ("up", "down"):
+            p1_up: Optional[bool] = phase1_state == "up"
+        elif tunnel_status in ("up", "down") and isinstance(proxyid, list) and len(proxyid) > 0:
+            p1_up = tunnel_status == "up"
+        else:
+            p1_up = None
+
+        # Evaluate Phase 2 / Proxy-ID selectors (ALL required selectors must be up)
+        selector_states: Dict[str, str] = {}
+        p2_up: Optional[bool] = None
+        if isinstance(proxyid, list) and len(proxyid) > 0:
+            valid_proxies = [p for p in proxyid if isinstance(p, dict)]
+            for idx, p in enumerate(valid_proxies):
+                sname = str(p.get("p2name") or p.get("name") or f"selector_{idx}")
+                sstat = str(p.get("status", "")).strip().lower()
+                selector_states[sname] = sstat or "unknown"
+
+            if isinstance(expected_selectors, list) and expected_selectors:
+                missing_expected = [s for s in expected_selectors if s not in selector_states]
+                if missing_expected:
+                    p2_up = False
+                else:
+                    target_states = [selector_states[s] for s in expected_selectors]
+                    if any(s == "unknown" for s in target_states):
+                        p2_up = None
+                    else:
+                        p2_up = all(s == "up" for s in target_states)
+            else:
+                if any(s == "unknown" for s in selector_states.values()):
+                    p2_up = None
+                else:
+                    p2_up = all(s == "up" for s in selector_states.values())
+        elif phase2_state in ("up", "down"):
+            p2_up = phase2_state == "up"
+
+        observed = {
+            "name": p1_name,
+            "status": tunnel_status,
+            "phase1": phase1_state,
+            "phase2": phase2_state,
+            "selectors": selector_states,
+        }
+
+        if p1_up is False or p2_up is False:
+            return VerificationResult(
+                status=VerificationStatus.FAILED,
+                target=p1_name,
+                vdom=proposal.vdom,
+                desired_state={"p1_name": p1_name, "phase1": "up", "phase2_all_selectors": "up"},
+                observed_state=observed,
+                evidence_source=source,
+                reason=f"IPsec tunnel '{p1_name}' failed verification (phase1_up={p1_up}, phase2_all_up={p2_up}, selectors={selector_states}).",
+            )
+        if p1_up is True and p2_up is True:
             return VerificationResult(
                 status=VerificationStatus.VERIFIED,
                 target=p1_name,
                 vdom=proposal.vdom,
-                desired_state=desired,
+                desired_state={"p1_name": p1_name, "phase1": "up", "phase2_all_selectors": "up"},
                 observed_state=observed,
                 evidence_source=source,
-                reason=f"IPsec tunnel '{p1_name}' confirmed UP after reset.",
+                reason=f"IPsec tunnel '{p1_name}' confirmed Phase 1 and all required Phase 2 selectors UP.",
             )
         return VerificationResult(
-            status=VerificationStatus.FAILED,
+            status=VerificationStatus.UNKNOWN,
             target=p1_name,
             vdom=proposal.vdom,
-            desired_state=desired,
+            desired_state={"p1_name": p1_name, "phase1": "up", "phase2_all_selectors": "up"},
             observed_state=observed,
             evidence_source=source,
-            reason=f"IPsec tunnel '{p1_name}' is still DOWN after reset.",
+            reason=f"IPsec tunnel '{p1_name}' response lacks sufficient Phase 1/Phase 2 selector fields to prove operational state.",
         )

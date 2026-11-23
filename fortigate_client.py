@@ -430,6 +430,27 @@ class FortiGateClient:
 
         return self._get("/monitor/system/interface")
 
+    def get_interface_config(self, interface_name: str) -> Dict[str, Any]:
+        """Retrieves CMDB administrative configuration for a specific network interface."""
+        encoded_intf = self._validate_path_segment(interface_name, "interface_name")
+        clean_intf = interface_name.strip()
+        if self.mock:
+            mock_intfs = self.get_interfaces().get("results", [])
+            matched = [
+                {
+                    "name": i["name"],
+                    "vdom": self.vdom,
+                    "status": i.get("status", "up"),
+                    "ip": i.get("ip", "0.0.0.0/0"),
+                    "allowaccess": "ping https ssh",
+                }
+                for i in mock_intfs
+                if isinstance(i, dict) and str(i.get("name", "")).lower() == clean_intf.lower()
+            ]
+            return {"status": "success", "vdom": self.vdom, "results": matched}
+
+        return self._get(f"/cmdb/system/interface/{encoded_intf}")
+
     def get_vpn_status(self) -> Dict[str, Any]:
         """Retrieves VPN tunnel status including IPsec and SSL-VPN details."""
         if self.mock:
@@ -580,6 +601,34 @@ class FortiGateClient:
             }
 
         return self._get("/monitor/router/ipv4")
+
+    def get_static_routes(self) -> Dict[str, Any]:
+        """Retrieves configured CMDB IPv4 static routes (/cmdb/router/static)."""
+        if self.mock:
+            return {
+                "status": "success",
+                "vdom": self.vdom,
+                "results": [
+                    {
+                        "seq-num": 1,
+                        "status": "enable",
+                        "dst": "0.0.0.0 0.0.0.0",
+                        "gateway": "198.51.100.1",
+                        "device": "port1",
+                        "distance": 10,
+                    },
+                    {
+                        "seq-num": 2,
+                        "status": "enable",
+                        "dst": "10.50.0.0 255.255.0.0",
+                        "gateway": "198.51.100.254",
+                        "device": "port1",
+                        "distance": 10,
+                    },
+                ],
+            }
+
+        return self._get("/cmdb/router/static")
 
     def get_system_logs(self, log_type: str = "event", limit: int = 15) -> Dict[str, Any]:
         """
@@ -1292,8 +1341,14 @@ class FortiGateClient:
         try:
             return self._get("/monitor/user/banned")
         except Exception as e:
-            logger.warning(f"Could not fetch banned users/IPs from /monitor/user/banned: {e}")
-            return {"status": "success", "results": []}
+            safe_err = self._sanitize_error_text(str(e))
+            logger.warning(f"Could not fetch banned users/IPs from /monitor/user/banned: {safe_err}")
+            return {
+                "status": "error",
+                "results": None,
+                "error": safe_err,
+                "message": f"Failed to retrieve banned/quarantined IPs: {safe_err}",
+            }
 
     def quarantine_ip_address(self, ip_address: str, duration_seconds: int = 3600, reason: str = "") -> Dict[str, Any]:
         """
