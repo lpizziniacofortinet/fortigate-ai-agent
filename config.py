@@ -12,6 +12,10 @@ class Config:
     GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-4-neon")
     ORCHESTRATOR_MODEL = os.getenv("ORCHESTRATOR_MODEL", "gemini-4-carbon")
     SPECIALIST_MODEL = os.getenv("SPECIALIST_MODEL", GEMINI_MODEL)
+    # Gemini 4 reasoning depth (MINIMAL, LOW, MEDIUM, HIGH, XHIGH); temperature is omitted on Gemini 4
+    GEMINI_THINKING_LEVEL = os.getenv("GEMINI_THINKING_LEVEL", "MEDIUM").strip().upper()
+    ORCHESTRATOR_THINKING_LEVEL = os.getenv("ORCHESTRATOR_THINKING_LEVEL", "HIGH").strip().upper()
+    SPECIALIST_THINKING_LEVEL = os.getenv("SPECIALIST_THINKING_LEVEL", GEMINI_THINKING_LEVEL).strip().upper()
     
     # FortiGate settings
     FORTIGATE_IP = os.getenv("FORTIGATE_IP", "")
@@ -43,6 +47,7 @@ class Config:
         table.add_column("Value", style="green")
         
         table.add_row("Gemini Model", cls.GEMINI_MODEL)
+        table.add_row("Thinking Level", f"{cls.GEMINI_THINKING_LEVEL} (Orchestrator: {cls.ORCHESTRATOR_THINKING_LEVEL})")
         table.add_row("Gemini API Key", "Configured (from environment)" if cls.GEMINI_API_KEY else "Missing (Specify GEMINI_API_KEY environment variable)")
         table.add_row("FortiGate IP", cls.FORTIGATE_IP if cls.FORTIGATE_IP else "<Not Configured>")
         table.add_row("FortiGate Port", str(cls.FORTIGATE_PORT))

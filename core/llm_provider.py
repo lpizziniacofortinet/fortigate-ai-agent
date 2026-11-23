@@ -9,12 +9,21 @@ from typing import Any, Callable, Dict, List, Optional
 from core.schemas import AgentRole, ModelProvenance
 
 
+VALID_THINKING_LEVELS = {"MINIMAL", "LOW", "MEDIUM", "HIGH", "XHIGH"}
+
+
+def is_gemini_4_model(model_id: str) -> bool:
+    """Returns True when model_id targets the Gemini 4 reasoning family."""
+    return (model_id or "").strip().lower().startswith("gemini-4")
+
+
 @dataclass(frozen=True)
 class ModelConfig:
-    """Configuration for a specific agent's model and provider."""
+    """Configuration for a specific agent's model, provider, and reasoning depth."""
     provider: str = "gemini"
     model_id: str = "gemini-4-neon"
-    temperature: float = 0.2
+    thinking_level: Optional[str] = "MEDIUM"
+    temperature: Optional[float] = None
     timeout_seconds: float = 90.0
     max_output_tokens: Optional[int] = None
 
@@ -71,8 +80,19 @@ class GeminiLLMProvider(BaseLLMProvider):
         config_kwargs: Dict[str, Any] = {
             "system_instruction": system_instruction,
             "tools": tools,
-            "temperature": model_config.temperature,
         }
+        applied_thinking_level: Optional[str] = None
+        if is_gemini_4_model(model_config.model_id):
+            # Gemini 4 uses thinking_level rather than sampling temperature
+            level = (model_config.thinking_level or "MEDIUM").strip().upper()
+            if level in VALID_THINKING_LEVELS:
+                config_kwargs["thinking_config"] = types.ThinkingConfig(thinking_level=level)
+                applied_thinking_level = level
+        else:
+            config_kwargs["temperature"] = (
+                model_config.temperature if model_config.temperature is not None else 0.2
+            )
+
         if model_config.max_output_tokens is not None:
             config_kwargs["max_output_tokens"] = model_config.max_output_tokens
 
@@ -104,6 +124,7 @@ class GeminiLLMProvider(BaseLLMProvider):
             provider=self.provider_name,
             model_id=model_config.model_id,
             role=role,
+            thinking_level=applied_thinking_level,
             latency_ms=elapsed_ms,
             token_usage=token_usage,
         )
@@ -145,6 +166,7 @@ class DeterministicMockProvider(BaseLLMProvider):
                 provider=self.provider_name,
                 model_id=model_config.model_id,
                 role=role,
+                thinking_level=model_config.thinking_level if is_gemini_4_model(model_config.model_id) else None,
                 latency_ms=elapsed_ms,
             ),
         )
@@ -152,9 +174,9 @@ class DeterministicMockProvider(BaseLLMProvider):
 
 class ModelRegistry:
     """
-    Resolves per-agent flagship model configurations.
-    Defaults to highest-capability Gemini 4 models (gemini-4-carbon for orchestration/remediation,
-    gemini-4-neon for domain specialists) and supports per-agent environment overrides.
+    Resolves per-agent flagship model and thinking-level configurations.
+    Defaults to highest-capability Gemini 4 models (gemini-4-carbon HIGH for orchestration/remediation,
+    gemini-4-neon MEDIUM for domain specialists) and supports per-agent environment overrides.
     """
 
     DEFAULT_ROLE_MODELS: Dict[AgentRole, str] = {
@@ -166,6 +188,15 @@ class ModelRegistry:
         AgentRole.HEALTH: "gemini-4-neon",
     }
 
+    DEFAULT_ROLE_THINKING_LEVELS: Dict[AgentRole, str] = {
+        AgentRole.ORCHESTRATOR: "HIGH",
+        AgentRole.REMEDIATION: "HIGH",
+        AgentRole.SECURITY: "MEDIUM",
+        AgentRole.THREAT: "MEDIUM",
+        AgentRole.NETWORK: "MEDIUM",
+        AgentRole.HEALTH: "MEDIUM",
+    }
+
     ROLE_ENV_VARS: Dict[AgentRole, str] = {
         AgentRole.ORCHESTRATOR: "ORCHESTRATOR_MODEL",
         AgentRole.REMEDIATION: "REMEDIATION_AGENT_MODEL",
@@ -173,6 +204,15 @@ class ModelRegistry:
         AgentRole.THREAT: "THREAT_AGENT_MODEL",
         AgentRole.NETWORK: "NETWORK_AGENT_MODEL",
         AgentRole.HEALTH: "HEALTH_AGENT_MODEL",
+    }
+
+    ROLE_THINKING_ENV_VARS: Dict[AgentRole, str] = {
+        AgentRole.ORCHESTRATOR: "ORCHESTRATOR_THINKING_LEVEL",
+        AgentRole.REMEDIATION: "REMEDIATION_AGENT_THINKING_LEVEL",
+        AgentRole.SECURITY: "SECURITY_AGENT_THINKING_LEVEL",
+        AgentRole.THREAT: "THREAT_AGENT_THINKING_LEVEL",
+        AgentRole.NETWORK: "NETWORK_AGENT_THINKING_LEVEL",
+        AgentRole.HEALTH: "HEALTH_AGENT_THINKING_LEVEL",
     }
 
     def __init__(self, overrides: Optional[Dict[AgentRole, ModelConfig]] = None):
@@ -191,4 +231,23 @@ class ModelRegistry:
             else:
                 model_id = os.getenv("SPECIALIST_MODEL") or os.getenv("GEMINI_MODEL") or self.DEFAULT_ROLE_MODELS[role]
 
-        return ModelConfig(provider=provider, model_id=model_id.strip())
+        model_id = model_id.strip()
+
+        thinking_env = self.ROLE_THINKING_ENV_VARS[role]
+        raw_level = os.getenv(thinking_env)
+        if not raw_level:
+            if role == AgentRole.ORCHESTRATOR:
+                raw_level = os.getenv("ORCHESTRATOR_THINKING_LEVEL", self.DEFAULT_ROLE_THINKING_LEVELS[role])
+            else:
+                raw_level = (
+                    os.getenv("SPECIALIST_THINKING_LEVEL")
+                    or os.getenv("GEMINI_THINKING_LEVEL")
+                    or self.DEFAULT_ROLE_THINKING_LEVELS[role]
+                )
+        thinking_level = raw_level.strip().upper() if raw_level else self.DEFAULT_ROLE_THINKING_LEVELS[role]
+        if thinking_level not in VALID_THINKING_LEVELS:
+            thinking_level = self.DEFAULT_ROLE_THINKING_LEVELS[role]
+
+        if is_gemini_4_model(model_id):
+            return ModelConfig(provider=provider, model_id=model_id, thinking_level=thinking_level, temperature=None)
+        return ModelConfig(provider=provider, model_id=model_id, thinking_level=None, temperature=0.2)
