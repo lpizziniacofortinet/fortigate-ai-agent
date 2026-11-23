@@ -528,6 +528,46 @@ def run_agentic_mode(agent: FortiGateAgent, prompt: Optional[str] = None):
     # Display Final Assessment
     console.print(Panel(Markdown(result["final_response"]), title="Final Agentic Assessment", border_style="purple"))
 
+
+def run_multi_agent_mode(client: FortiGateClient, prompt: Optional[str] = None, output_json: bool = False):
+    """Runs the coordinated Multi-Agent Orchestrator + Domain Specialists workflow (Issue #16)."""
+    from core.context import InvestigationContext
+    from core.llm_provider import GeminiLLMProvider
+    from core.orchestrator import OrchestratorAgent
+
+    objective = prompt.strip() if prompt and prompt.strip() else DEFAULT_AGENTIC_PROMPT
+    context = InvestigationContext(fg_client=client)
+    provider = GeminiLLMProvider(api_key=Config.GEMINI_API_KEY)
+    orchestrator = OrchestratorAgent(provider=provider)
+
+    if output_json:
+        report = orchestrator.investigate(objective, context)
+        json_out = report.model_dump_json(indent=2)
+        print(json_out)
+        if Config.OUTPUT_FILE:
+            export_report(json_out, Config.OUTPUT_FILE, is_json=True)
+        return
+
+    console.print("\n[bold purple]Starting Coordinated Multi-Agent Investigation...[/bold purple]")
+    console.print(f"[cyan]Correlation ID:[/cyan] {context.correlation_id} | [cyan]Objective:[/cyan] {objective}\n")
+
+    with console.status("[bold purple]Orchestrator planning & dispatching read-only specialist agents in parallel..."):
+        report = orchestrator.investigate(objective, context)
+
+    roles_str = ", ".join(r.value for r in report.plan.selected_roles)
+    console.print(Panel(
+        f"[bold]Overall Status:[/bold] {report.overall_status.upper()} | [bold]Confidence:[/bold] {report.confidence.value.upper()}\n"
+        f"[bold]Specialists Dispatched:[/bold] {roles_str}\n"
+        f"[bold]Findings:[/bold] {len(report.correlated_findings)} | [bold]Contradictions:[/bold] {len(report.contradictions)} | [bold]Unknowns:[/bold] {len(report.unknowns)}",
+        title="Multi-Agent Investigation Summary",
+        border_style="cyan"
+    ))
+    console.print(Panel(Markdown(report.executive_summary), title="Orchestrator Executive Synthesis", border_style="purple"))
+
+    if report.recommended_actions:
+        actions_md = "\n".join(f"- {a}" for a in report.recommended_actions)
+        console.print(Panel(Markdown(actions_md), title="Prioritized Next Actions", border_style="green"))
+
 def run_security_audit_mode(client: FortiGateClient, playbook_path: Optional[str] = None, output_json: bool = False):
     """Executes the full FortiOS Security Posture & CIS Hardening Benchmark Audit."""
     auditor = FortiGateSecurityAuditor(client)
@@ -590,7 +630,7 @@ def parse_args():
     parser.add_argument(
         "command",
         nargs="?",
-        choices=["diagnose", "interactive", "agentic", "config", "backup", "audit"],
+        choices=["diagnose", "interactive", "agentic", "multi-agent", "config", "backup", "audit"],
         help="Command to run directly. If omitted, displays the interactive selection menu."
     )
     parser.add_argument(
@@ -768,6 +808,9 @@ def main():
             return
         elif cmd == "agentic":
             run_agentic_mode(agent, prompt=args.prompt)
+            return
+        elif cmd == "multi-agent":
+            run_multi_agent_mode(client, prompt=args.prompt, output_json=args.json)
             return
         elif cmd == "audit":
             run_security_audit_mode(client, playbook_path=args.playbook, output_json=args.json)
