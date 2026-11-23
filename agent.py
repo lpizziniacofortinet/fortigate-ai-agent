@@ -560,16 +560,31 @@ class FortiGateAgent:
         # The Client will automatically look for GEMINI_API_KEY environment variable if api_key is None
         self.ai_client = genai.Client(api_key=api_key or Config.GEMINI_API_KEY)
         self.model = Config.GEMINI_MODEL
+        self.thinking_level = Config.GEMINI_THINKING_LEVEL
+
+    def _build_generate_config(self) -> types.GenerateContentConfig:
+        """
+        Builds GenerateContentConfig respecting Gemini 4 reasoning semantics:
+        - Gemini 4 models omit `temperature` and use `thinking_config(thinking_level=...)`.
+        - Legacy models (e.g. Gemini 2.5) use `temperature=0.2` for factual diagnostics.
+        """
+        kwargs: Dict[str, Any] = {
+            "system_instruction": SYSTEM_INSTRUCTION,
+            "tools": FORTIGATE_TOOLS,
+        }
+        if (self.model or "").strip().lower().startswith("gemini-4"):
+            level = (self.thinking_level or "MEDIUM").strip().upper()
+            if level in ("MINIMAL", "LOW", "MEDIUM", "HIGH", "XHIGH"):
+                kwargs["thinking_config"] = types.ThinkingConfig(thinking_level=level)
+        else:
+            kwargs["temperature"] = 0.2
+        return types.GenerateContentConfig(**kwargs)
 
     def run_query(self, prompt: str) -> str:
         """Runs a single prompt query against the agent with automatic tool calling."""
         logger.info(f"Running agent query: '{prompt}'")
         
-        config = types.GenerateContentConfig(
-            system_instruction=SYSTEM_INSTRUCTION,
-            tools=FORTIGATE_TOOLS,
-            temperature=0.2  # Lower temperature for more factual diagnostic responses
-        )
+        config = self._build_generate_config()
         
         response = self.ai_client.models.generate_content(
             model=self.model,
@@ -584,11 +599,7 @@ class FortiGateAgent:
         import json
         schema_json = DiagnosticReport.model_json_schema()
         
-        config = types.GenerateContentConfig(
-            system_instruction=SYSTEM_INSTRUCTION,
-            tools=FORTIGATE_TOOLS,
-            temperature=0.2
-        )
+        config = self._build_generate_config()
         
         full_prompt = (
             f"{prompt}\n\n"
@@ -632,11 +643,7 @@ class FortiGateAgent:
 
     def create_chat_session(self):
         """Creates an interactive chat session with automatic function calling."""
-        config = types.GenerateContentConfig(
-            system_instruction=SYSTEM_INSTRUCTION,
-            tools=FORTIGATE_TOOLS,
-            temperature=0.2
-        )
+        config = self._build_generate_config()
         
         return self.ai_client.chats.create(
             model=self.model,

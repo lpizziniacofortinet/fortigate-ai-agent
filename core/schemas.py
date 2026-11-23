@@ -81,6 +81,7 @@ class ModelProvenance(BaseModel):
     provider: str
     model_id: str
     role: AgentRole
+    thinking_level: Optional[str] = None
     latency_ms: float = 0.0
     token_usage: Dict[str, int] = Field(default_factory=dict)
 

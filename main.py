@@ -698,6 +698,11 @@ def parse_args():
         help="Override Gemini model name (e.g. gemini-4-carbon, gemini-4-neon, gemini-4-argon, gemini-3.1-pro-preview)."
     )
     parser.add_argument(
+        "--thinking-level",
+        choices=["minimal", "low", "medium", "high", "xhigh"],
+        help="Override Gemini 4 reasoning thinking level (default: medium for specialists, high for orchestrator)."
+    )
+    parser.add_argument(
         "--prompt",
         help="Custom objective or investigative prompt for autonomous agentic reasoning mode."
     )
@@ -709,6 +714,14 @@ def main():
     # Apply CLI overrides to Config
     if args.model:
         Config.GEMINI_MODEL = args.model
+    if getattr(args, "thinking_level", None):
+        lvl = args.thinking_level.upper()
+        Config.GEMINI_THINKING_LEVEL = lvl
+        Config.ORCHESTRATOR_THINKING_LEVEL = lvl
+        Config.SPECIALIST_THINKING_LEVEL = lvl
+        os.environ["GEMINI_THINKING_LEVEL"] = lvl
+        os.environ["ORCHESTRATOR_THINKING_LEVEL"] = lvl
+        os.environ["SPECIALIST_THINKING_LEVEL"] = lvl
     if args.mock:
         Config.MOCK_MODE = True
     if args.ip:
