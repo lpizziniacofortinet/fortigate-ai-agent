@@ -1,5 +1,6 @@
 import os
 import sys
+import html
 import json
 import logging
 import argparse
@@ -44,13 +45,23 @@ from rich.align import Align
 from rich.text import Text
 
 def export_report_to_html(markdown_content: str, output_path: str, title: str = "FortiGate AI Operations & Health Report"):
-    """Exports diagnostic report to a standalone, responsive, styled HTML document."""
+    """Exports diagnostic report to a standalone, responsive, XSS-hardened HTML document."""
+    safe_title = html.escape(title, quote=True)
+    safe_pre_content = html.escape(markdown_content, quote=False)
+    safe_json_content = (
+        json.dumps(markdown_content)
+        .replace("<", "\\u003c")
+        .replace(">", "\\u003e")
+        .replace("&", "\\u0026")
+        .replace("\u2028", "\\u2028")
+        .replace("\u2029", "\\u2029")
+    )
     html_template = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{title}</title>
+    <title>{safe_title}</title>
     <style>
         :root {{
             --bg-color: #0f172a;
@@ -114,8 +125,8 @@ def export_report_to_html(markdown_content: str, output_path: str, title: str = 
         pre code {{ padding: 0; background: none; color: #f1f5f9; }}
         .footer {{ text-align: center; color: var(--text-muted); font-size: 0.85rem; margin-top: 3rem; }}
     </style>
-    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.9/dist/purify.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js" integrity="sha384-/TQbtLCAerC3jgaim+N78RZSDYV7ryeoBCVqTuzRrFec2akfBkHS7ACQ3PQhvMVi" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.9/dist/purify.min.js" integrity="sha384-3HPB1XT51W3gGRxAmZ+qbZwRpRlFQL632y8x+adAqCr4Wp3TaWwCLSTAJJKbyWEK" crossorigin="anonymous"></script>
 </head>
 <body>
     <div class="container">
@@ -124,18 +135,17 @@ def export_report_to_html(markdown_content: str, output_path: str, title: str = 
             <p>Generated on {datetime.now().strftime("%Y-%m-%d %H:%M:%S")} | Powered by Gemini AI Agent</p>
         </div>
         <div class="card" id="report-content">
-            <pre style="white-space: pre-wrap;">{markdown_content}</pre>
+            <pre style="white-space: pre-wrap;">{safe_pre_content}</pre>
         </div>
         <div class="footer">
             <p>FortiGate AI Operations & Diagnostics Agent | Executive Operational Report</p>
         </div>
     </div>
     <script>
-        if (typeof marked !== 'undefined') {{
-            const rawContent = {json.dumps(markdown_content)};
+        if (typeof marked !== 'undefined' && typeof DOMPurify !== 'undefined') {{
+            const rawContent = {safe_json_content};
             const parsedHTML = marked.parse(rawContent);
-            const sanitizedHTML = typeof DOMPurify !== 'undefined' ? DOMPurify.sanitize(parsedHTML) : parsedHTML;
-            document.getElementById('report-content').innerHTML = sanitizedHTML;
+            document.getElementById('report-content').innerHTML = DOMPurify.sanitize(parsedHTML);
         }}
     </script>
 </body>
