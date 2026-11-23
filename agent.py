@@ -6,6 +6,12 @@ from pydantic import BaseModel, Field
 
 from config import Config
 from fortigate_client import FortiGateClient
+from write_authorization import (
+    ApprovalToken,
+    ChangeProposal,
+    WriteApprovalError,
+    WriteAuthorizationController,
+)
 
 logger = logging.getLogger("FortiGateAgent")
 
@@ -21,8 +27,10 @@ class DiagnosticReport(BaseModel):
     findings: List[DiagnosticFinding] = Field(description="Detailed component status findings")
     troubleshooting_steps: List[str] = Field(description="Step-by-step troubleshooting recommendations for any warnings or critical findings")
 
-# Global reference to the initialized FortiGateClient
+# Global reference to the initialized FortiGateClient and WriteAuthorizationController
 _client: Optional[FortiGateClient] = None
+_auth_controller: WriteAuthorizationController = WriteAuthorizationController()
+
 
 def get_fg_client() -> FortiGateClient:
     """Helper to get the current FortiGate client."""
@@ -30,6 +38,50 @@ def get_fg_client() -> FortiGateClient:
     if _client is None:
         raise ValueError("FortiGateClient has not been initialized. Call initialize_agent_client() first.")
     return _client
+
+
+def get_write_auth_controller() -> WriteAuthorizationController:
+    """Returns the active centralized WriteAuthorizationController."""
+    return _auth_controller
+
+
+def set_write_auth_controller(controller: WriteAuthorizationController) -> None:
+    """Sets the active centralized WriteAuthorizationController."""
+    global _auth_controller
+    _auth_controller = controller
+
+
+def _authorize_write(
+    client: FortiGateClient,
+    action: str,
+    target: str,
+    parameters: Dict[str, Any],
+    current_state: Optional[Dict[str, Any]] = None,
+    proposed_state: Optional[Dict[str, Any]] = None,
+    risk: str = "high",
+) -> ChangeProposal:
+    """
+    Centralized write pre-authorization gate for all agent remediation tools.
+    Enforces ENABLE_WRITE_ACTIONS and explicit proposal-bound approval (never bypassed in non-TTY mode).
+    """
+    if not client.enable_write_actions:
+        raise PermissionError(
+            "Write/Mitigation actions are currently disabled. Set ENABLE_WRITE_ACTIONS=True in .env "
+            "or use the --enable-write CLI flag, and ensure your API key has write permissions."
+        )
+
+    controller = get_write_auth_controller()
+    proposal = controller.create_proposal(
+        action=action,
+        target=target,
+        vdom=client.vdom,
+        parameters=parameters,
+        current_state=current_state or {"unknown": True},
+        proposed_state=proposed_state or parameters,
+        risk=risk,
+    )
+    controller.authorize(proposal)
+    return proposal
 
 # =====================================================================
 # Tools for the Gemini Agent (with docstrings for the LLM to inspect)
@@ -124,23 +176,16 @@ def reset_vpn_tunnel(p1_name: str) -> Dict[str, Any]:
     Parameters:
     - p1_name: The Phase 1 configuration name of the VPN tunnel to reset.
     """
-    import sys
     client = get_fg_client()
-    
-    if not client.enable_write_actions:
-        raise PermissionError(
-            "Write/Mitigation actions are currently disabled. Set ENABLE_WRITE_ACTIONS=True in .env "
-            "or use the --enable-write CLI flag, and ensure your API key has write permissions."
-        )
-
-    if sys.stdin.isatty():
-        from rich.console import Console
-        from rich.prompt import Confirm
-        console = Console()
-        console.print(f"\n[bold yellow]⚠️  WARNING: AI Agent requested to RESET VPN Tunnel: [bold cyan]{p1_name}[/bold cyan][/bold yellow]")
-        if not Confirm.ask("Do you authorize this operation?"):
-            raise PermissionError("User rejected the VPN reset operation.")
-
+    _authorize_write(
+        client=client,
+        action="reset_vpn_tunnel",
+        target=p1_name,
+        parameters={"p1_name": p1_name},
+        current_state={"tunnel": p1_name},
+        proposed_state={"tunnel": p1_name, "operation": "reset_phase1"},
+        risk="high",
+    )
     return client.reset_vpn_tunnel(p1_name=p1_name)
 
 def toggle_interface(interface_name: str, status: str) -> Dict[str, Any]:
@@ -152,23 +197,16 @@ def toggle_interface(interface_name: str, status: str) -> Dict[str, Any]:
     - interface_name: The name of the interface (e.g. 'port1', 'port2').
     - status: Target status, must be 'up' or 'down'.
     """
-    import sys
     client = get_fg_client()
-    
-    if not client.enable_write_actions:
-        raise PermissionError(
-            "Write/Mitigation actions are currently disabled. Set ENABLE_WRITE_ACTIONS=True in .env "
-            "or use the --enable-write CLI flag, and ensure your API key has write permissions."
-        )
-
-    if sys.stdin.isatty():
-        from rich.console import Console
-        from rich.prompt import Confirm
-        console = Console()
-        console.print(f"\n[bold yellow]⚠️  WARNING: AI Agent requested to TOGGLE interface [bold cyan]{interface_name}[/bold cyan] to [bold cyan]{status}[/bold cyan][/bold yellow]")
-        if not Confirm.ask("Do you authorize this operation?"):
-            raise PermissionError("User rejected the interface toggle operation.")
-
+    _authorize_write(
+        client=client,
+        action="toggle_interface",
+        target=interface_name,
+        parameters={"interface_name": interface_name, "status": status},
+        current_state={"interface": interface_name},
+        proposed_state={"interface": interface_name, "status": status},
+        risk="high",
+    )
     return client.toggle_interface(interface_name=interface_name, status=status)
 
 def add_static_route(destination: str, gateway: str, interface: str) -> Dict[str, Any]:
@@ -181,23 +219,16 @@ def add_static_route(destination: str, gateway: str, interface: str) -> Dict[str
     - gateway: Next-hop gateway IP address (e.g. '198.51.100.254').
     - interface: Output interface device name (e.g. 'port1').
     """
-    import sys
     client = get_fg_client()
-    
-    if not client.enable_write_actions:
-        raise PermissionError(
-            "Write/Mitigation actions are currently disabled. Set ENABLE_WRITE_ACTIONS=True in .env "
-            "or use the --enable-write CLI flag, and ensure your API key has write permissions."
-        )
-
-    if sys.stdin.isatty():
-        from rich.console import Console
-        from rich.prompt import Confirm
-        console = Console()
-        console.print(f"\n[bold yellow]⚠️  WARNING: AI Agent requested to ADD static route to [bold cyan]{destination}[/bold cyan] via [bold cyan]{gateway}[/bold cyan] on [bold cyan]{interface}[/bold cyan][/bold yellow]")
-        if not Confirm.ask("Do you authorize this operation?"):
-            raise PermissionError("User rejected the static route addition.")
-
+    _authorize_write(
+        client=client,
+        action="add_static_route",
+        target=destination,
+        parameters={"destination": destination, "gateway": gateway, "interface": interface},
+        current_state={"destination": destination, "configured": False},
+        proposed_state={"destination": destination, "gateway": gateway, "interface": interface},
+        risk="high",
+    )
     return client.add_static_route(destination=destination, gateway=gateway, interface=interface)
 
 def get_bgp_neighbors() -> Dict[str, Any]:
@@ -249,23 +280,16 @@ def toggle_firewall_policy(policy_id: int, status: str) -> Dict[str, Any]:
     - policy_id: The numerical ID of the firewall security policy (e.g. 5).
     - status: Target status, must be 'enable' or 'disable'.
     """
-    import sys
     client = get_fg_client()
-    
-    if not client.enable_write_actions:
-        raise PermissionError(
-            "Write/Mitigation actions are currently disabled. Set ENABLE_WRITE_ACTIONS=True in .env "
-            "or use the --enable-write CLI flag, and ensure your API key has write permissions."
-        )
-
-    if sys.stdin.isatty():
-        from rich.console import Console
-        from rich.prompt import Confirm
-        console = Console()
-        console.print(f"\n[bold yellow]⚠️  WARNING: AI Agent requested to TOGGLE firewall policy ID [bold cyan]{policy_id}[/bold cyan] to [bold cyan]{status}[/bold cyan][/bold yellow]")
-        if not Confirm.ask("Do you authorize this operation?"):
-            raise PermissionError("User rejected the firewall policy toggle operation.")
-
+    _authorize_write(
+        client=client,
+        action="toggle_firewall_policy",
+        target=f"policy:{policy_id}",
+        parameters={"policy_id": policy_id, "status": status},
+        current_state={"policy_id": policy_id},
+        proposed_state={"policy_id": policy_id, "status": status},
+        risk="high",
+    )
     return client.toggle_firewall_policy(policy_id=policy_id, status=status)
 
 def apply_policy_hardening(policy_id: int) -> Dict[str, Any]:
@@ -276,23 +300,16 @@ def apply_policy_hardening(policy_id: int) -> Dict[str, Any]:
     Parameters:
     - policy_id: The numerical ID of the firewall security policy to harden (e.g. 2, 3, 4, 5).
     """
-    import sys
     client = get_fg_client()
-    
-    if not client.enable_write_actions:
-        raise PermissionError(
-            "Write/Mitigation actions are currently disabled. Set ENABLE_WRITE_ACTIONS=True in .env "
-            "or use the --enable-write CLI flag, and ensure your API key has write permissions."
-        )
-
-    if sys.stdin.isatty():
-        from rich.console import Console
-        from rich.prompt import Confirm
-        console = Console()
-        console.print(f"\n[bold yellow]⚠️  WARNING: AI Agent requested to APPLY UTM HARDENING to firewall policy ID [bold cyan]{policy_id}[/bold cyan][/bold yellow]")
-        if not Confirm.ask("Do you authorize this hardening update on the live firewall?"):
-            raise PermissionError("User rejected the policy hardening operation.")
-
+    _authorize_write(
+        client=client,
+        action="apply_policy_hardening",
+        target=f"policy:{policy_id}",
+        parameters={"policy_id": policy_id},
+        current_state={"policy_id": policy_id, "utm_hardened": False},
+        proposed_state={"policy_id": policy_id, "utm_status": "enable", "logtraffic": "all"},
+        risk="high",
+    )
     return client.apply_policy_hardening(policy_id=policy_id)
 
 def disconnect_ssl_vpn_user(username: str) -> Dict[str, Any]:
@@ -303,23 +320,16 @@ def disconnect_ssl_vpn_user(username: str) -> Dict[str, Any]:
     Parameters:
     - username: The SSL-VPN user account name to terminate (e.g. 'jdoe').
     """
-    import sys
     client = get_fg_client()
-    
-    if not client.enable_write_actions:
-        raise PermissionError(
-            "Write/Mitigation actions are currently disabled. Set ENABLE_WRITE_ACTIONS=True in .env "
-            "or use the --enable-write CLI flag, and ensure your API key has write permissions."
-        )
-
-    if sys.stdin.isatty():
-        from rich.console import Console
-        from rich.prompt import Confirm
-        console = Console()
-        console.print(f"\n[bold yellow]⚠️  WARNING: AI Agent requested to DISCONNECT SSL-VPN session for user: [bold cyan]{username}[/bold cyan][/bold yellow]")
-        if not Confirm.ask("Do you authorize this operation?"):
-            raise PermissionError("User rejected the SSL-VPN disconnect operation.")
-
+    _authorize_write(
+        client=client,
+        action="disconnect_ssl_vpn_user",
+        target=username,
+        parameters={"username": username},
+        current_state={"ssl_vpn_user": username, "connected": True},
+        proposed_state={"ssl_vpn_user": username, "connected": False},
+        risk="medium",
+    )
     return client.disconnect_ssl_vpn_user(username=username)
 
 def get_vdom_list() -> Dict[str, Any]:
@@ -395,25 +405,16 @@ def quarantine_ip_address(ip_address: str, duration_seconds: int = 3600, reason:
     - duration_seconds: Ban duration in seconds (default: 3600 = 1 hour, 0 for permanent).
     - reason: Context or explanation for why the IP is being quarantined.
     """
-    import sys
     client = get_fg_client()
-    
-    if not client.enable_write_actions:
-        raise PermissionError(
-            "Write/Mitigation actions are currently disabled. Set ENABLE_WRITE_ACTIONS=True in .env "
-            "or use the --enable-write CLI flag, and ensure your API key has write permissions."
-        )
-
-    if sys.stdin.isatty():
-        from rich.console import Console
-        from rich.prompt import Confirm
-        console = Console()
-        console.print(f"\n[bold red]🚨 CRITICAL WARNING: AI Agent requested to QUARANTINE / BAN IP: [bold white]{ip_address}[/bold white] for {duration_seconds}s[/bold red]")
-        if reason:
-            console.print(f"[yellow]Reason:[/yellow] {reason}")
-        if not Confirm.ask("Do you authorize this quarantine operation?"):
-            raise PermissionError("User rejected the quarantine operation.")
-
+    _authorize_write(
+        client=client,
+        action="quarantine_ip_address",
+        target=ip_address,
+        parameters={"ip_address": ip_address, "duration_seconds": duration_seconds, "reason": reason},
+        current_state={"ip_address": ip_address, "quarantined": False},
+        proposed_state={"ip_address": ip_address, "quarantined": True, "duration_seconds": duration_seconds},
+        risk="critical",
+    )
     return client.quarantine_ip_address(ip_address=ip_address, duration_seconds=duration_seconds, reason=reason)
 
 def run_security_audit() -> Dict[str, Any]:
