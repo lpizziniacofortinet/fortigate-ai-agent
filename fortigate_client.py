@@ -14,6 +14,31 @@ class TLSVerificationError(RuntimeError):
     pass
 
 
+class BackupRequiredError(RuntimeError):
+    """
+    Raised when pre-change configuration backup is enabled (fail-closed)
+    and the backup fails or its resulting artifact cannot be verified.
+    """
+    def __init__(self, blocked_action: str, reason: str, backup_path: Optional[str] = None):
+        self.blocked_action = blocked_action
+        self.reason = reason
+        self.backup_path = backup_path
+        super().__init__(
+            f"Write action '{blocked_action}' aborted: pre-change configuration backup failed ({reason}). "
+            "No changes were sent to the FortiGate. Set BACKUP_BEFORE_WRITE=False only if you explicitly intend to bypass pre-change backups."
+        )
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "status": "blocked",
+            "error": "backup_required",
+            "blocked_action": self.blocked_action,
+            "reason": self.reason,
+            "backup_path": self.backup_path,
+            "message": str(self),
+        }
+
+
 class FortiGateClient:
     """
     A client for interacting with the FortiOS REST API.
@@ -126,6 +151,49 @@ class FortiGateClient:
         except requests.exceptions.RequestException as e:
             logger.error(f"Error calling endpoint {url}: {e}")
             raise ConnectionError(f"Failed to communicate with FortiGate at {self.host}: {e}")
+
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=1, max=4),
+        retry=retry_if_exception_type((requests.exceptions.RequestException, ConnectionError)),
+        reraise=True
+    )
+    def _get_raw(self, path: str, params: Optional[Dict[str, Any]] = None) -> str:
+        """Helper to send GET requests to non-JSON FortiOS endpoints (e.g., config backup)."""
+        if self.mock:
+            raise NotImplementedError("Direct REST API call not supported in mock mode.")
+
+        url = f"{self.base_url}{path}"
+        req_params = params.copy() if params else {}
+        if self.vdom and "vdom" not in req_params:
+            req_params["vdom"] = self.vdom
+
+        verify_path = self._resolve_ssl_verify()
+        raw_headers = {
+            "Authorization": f"Bearer {self.token}",
+            "Accept": "*/*"
+        }
+
+        try:
+            logger.info(f"Sending raw GET request to {url} (params: {req_params}, verify: {verify_path})")
+            response = requests.get(
+                url,
+                headers=raw_headers,
+                params=req_params,
+                verify=verify_path,
+                timeout=30
+            )
+            if response.status_code == 429:
+                logger.warning("API rate limit hit (429). Retrying...")
+                response.raise_for_status()
+
+            response.raise_for_status()
+            return response.text
+        except requests.exceptions.SSLError as e:
+            self._raise_tls_error(url, e)
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Error calling raw endpoint {url}: {e}")
+            raise ConnectionError(f"Failed to retrieve raw data from FortiGate at {self.host}: {e}")
 
     @retry(
         stop=stop_after_attempt(3),
@@ -565,8 +633,41 @@ class FortiGateClient:
         logger.warning("All log endpoints failed. Returning empty log results.")
         return {"status": "warning", "results": [], "message": "Log retrieval not supported or logging is disabled on target FortiGate"}
 
+    def _sanitize_error_text(self, text: str) -> str:
+        """Redacts configured API token from error strings before returning or logging."""
+        sanitized = str(text)
+        if self.token:
+            sanitized = sanitized.replace(self.token, "[REDACTED]")
+        return sanitized
+
+    def _verify_backup_artifact(self, file_path: Optional[str]) -> int:
+        """
+        Verifies that a configuration backup file exists, is non-empty,
+        and can be read cleanly as valid configuration text.
+        Returns the verified byte size.
+        """
+        if not file_path or not os.path.isfile(file_path):
+            raise ValueError(f"Backup artifact does not exist: '{file_path}'")
+
+        size_bytes = os.path.getsize(file_path)
+        if size_bytes <= 0:
+            raise ValueError(f"Backup artifact is empty (0 bytes): '{file_path}'")
+
+        with open(file_path, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        stripped = content.strip()
+        if not stripped:
+            raise ValueError(f"Backup artifact contains only whitespace: '{file_path}'")
+
+        # Reject JSON error envelopes mistakenly saved as .conf
+        if stripped.startswith("{") and '"status"' in stripped and '"error"' in stripped:
+            raise ValueError(f"Backup artifact appears to be an API error payload, not a FortiOS configuration: '{file_path}'")
+
+        return size_bytes
+
     def _execute_write_prechecks(self, action_name: str, details: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """Validates write permissions, handles dry-run simulation, and triggers pre-change backup."""
+        """Validates write permissions, handles dry-run simulation, and enforces fail-closed pre-change backup."""
         if not self.enable_write_actions:
             raise PermissionError(
                 "Write/Mitigation actions are currently disabled. Set ENABLE_WRITE_ACTIONS=True in .env "
@@ -583,17 +684,31 @@ class FortiGateClient:
             }
 
         if self.backup_before_write:
+            backup_path: Optional[str] = None
             try:
                 backup_res = self.backup_configuration()
-                logger.info(f"Pre-change configuration backup created: {backup_res.get('file_path')}")
+                backup_path = backup_res.get("file_path") if isinstance(backup_res, dict) else None
+                verified_bytes = self._verify_backup_artifact(backup_path)
+                logger.info(
+                    f"Pre-change configuration backup verified: {backup_path} ({verified_bytes} bytes)"
+                )
             except Exception as e:
-                logger.warning(f"Could not complete pre-change configuration backup: {e}")
+                safe_reason = self._sanitize_error_text(str(e))
+                logger.error(
+                    f"Aborting write action '{action_name}': pre-change backup failed ({safe_reason})"
+                )
+                raise BackupRequiredError(
+                    blocked_action=action_name,
+                    reason=safe_reason,
+                    backup_path=backup_path,
+                ) from e
 
         return None
 
     def backup_configuration(self, destination_dir: str = ".backups") -> Dict[str, Any]:
         """
         Retrieves a full system configuration snapshot from the FortiGate and saves it locally.
+        Verifies the resulting backup file exists, is non-empty, and is readable.
         """
         clean_dir = os.path.normpath(destination_dir)
         os.makedirs(clean_dir, exist_ok=True)
@@ -616,33 +731,43 @@ class FortiGateClient:
             )
             with open(file_path, "w", encoding="utf-8") as f:
                 f.write(content)
+            size_bytes = self._verify_backup_artifact(file_path)
 
             return {
                 "status": "success",
                 "file_path": file_path,
                 "file_name": file_name,
+                "size_bytes": size_bytes,
+                "verified": True,
                 "message": f"Configuration backup snapshot saved to '{file_path}'.",
                 "timestamp": timestamp,
                 "scope": "global"
             }
 
         try:
-            resp = self._get("/monitor/system/config/backup", params={"scope": "global"})
-            content = resp if isinstance(resp, str) else str(resp)
+            content = self._get_raw("/monitor/system/config/backup", params={"scope": "global"})
+            if not isinstance(content, str) or not content.strip():
+                raise ValueError("FortiGate returned an empty configuration backup response.")
             with open(file_path, "w", encoding="utf-8") as f:
                 f.write(content)
+            size_bytes = self._verify_backup_artifact(file_path)
 
             return {
                 "status": "success",
                 "file_path": file_path,
                 "file_name": file_name,
+                "size_bytes": size_bytes,
+                "verified": True,
                 "message": f"Live configuration backup snapshot saved to '{file_path}'.",
                 "timestamp": timestamp,
                 "scope": "global"
             }
+        except TLSVerificationError:
+            raise
         except Exception as e:
-            logger.error(f"Failed to backup configuration from FortiGate: {e}")
-            raise ConnectionError(f"Configuration backup failed: {e}")
+            safe_err = self._sanitize_error_text(str(e))
+            logger.error(f"Failed to backup configuration from FortiGate: {safe_err}")
+            raise ConnectionError(f"Configuration backup failed: {safe_err}") from e
 
     def reset_vpn_tunnel(self, p1_name: str) -> Dict[str, Any]:
         """
