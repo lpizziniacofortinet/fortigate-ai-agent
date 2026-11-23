@@ -330,13 +330,17 @@ Launch the application without arguments to view the interactive Rich TUI menu:
 ```bash
 python3 main.py
 ```
-This presents 6 options:
+
+![FortiGate AI Agent Interactive CLI Menu](main.png)
+
+This presents 7 options:
 1. **Run Automated Diagnostics & Health Report**: Executes a full health assessment.
 2. **Enter Interactive Chat Console**: Launches a stateful conversational session with live tool calling.
 3. **Run Autonomous Agentic Reasoning Call**: Executes multi-turn reasoning with live tool execution tracing.
-4. **Create Configuration Snapshot Backup**: Manually triggers an immediate full configuration backup snapshot.
-5. **View Current Configuration Settings**: Displays active settings in a formatted table.
-6. **Exit**: Exits the program.
+4. **Run FortiOS Security Posture & CIS Hardening Benchmark**: Audits security posture, detects policy shadowing, and exports a CLI hardening playbook.
+5. **Create Configuration Snapshot Backup**: Manually triggers an immediate verified `.conf` backup snapshot.
+6. **View Current Configuration Settings**: Displays active settings in a formatted table.
+7. **Exit**: Exits the program.
 
 ### CLI Direct Commands & Overrides
 You can bypass the menu and directly run specific commands or override settings using command-line arguments:
