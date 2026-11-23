@@ -16,7 +16,7 @@ class Config:
     FORTIGATE_TOKEN = os.getenv("FORTIGATE_TOKEN", "")
     FORTIGATE_PORT = int(os.getenv("FORTIGATE_PORT", "443"))
     USE_SSL = os.getenv("USE_SSL", "True").lower() in ("true", "1", "yes")
-    VERIFY_SSL = os.getenv("VERIFY_SSL", "False").lower() in ("true", "1", "yes")
+    VERIFY_SSL = os.getenv("VERIFY_SSL", "True").lower() in ("true", "1", "yes")
     
     FORTIGATE_VDOM = os.getenv("FORTIGATE_VDOM", "root")
     CA_BUNDLE = os.getenv("CA_BUNDLE", "")
